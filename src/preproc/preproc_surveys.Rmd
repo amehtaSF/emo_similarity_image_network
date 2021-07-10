@@ -1,0 +1,102 @@
+---
+title: "Preprocessing script"
+author: "Ashish"
+date: "`r Sys.Date()`"
+output: rmdformats::readthedown
+---
+
+# Initialization
+```{r, message=FALSE}
+library(rsurveyutils)
+library(here)
+library(tidyverse)
+library(tidylog)
+theme_set(theme_bw())
+```
+
+
+# Preprocessing
+## Functions
+```{r}
+recent_date_dir <- function(directory, recursive=FALSE){
+  files <- list.files(directory, 
+                      pattern="[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}$",
+                      include.dirs=TRUE,
+                      recursive=recursive)
+  files <- sort(as.Date(files), decreasing = TRUE)
+  date_dir_path <- paste0(directory, "/", files[1])
+  return(date_dir_path)
+}
+```
+
+
+## Read data
+```{r}
+data_dir <- recent_date_dir(here("data/raw/emo_similarity_network_presurvey_sum2021"))
+codebook_vars_filepath <- paste0(data_dir, 
+                                 "/emo_similarity_network_presurvey_sum2021_var_codebook.csv")
+codebook_values_filepath <- paste0(data_dir,
+                                "/emo_similarity_network_presurvey_sum2021_value_codebook.csv")
+codebook_vars <- read_csv(codebook_vars_filepath)
+codebook_values <- read_csv(codebook_values_filepath)
+
+filepath <- paste0(data_dir, "/emo_similarity_network_presurvey_sum2021.csv")
+df_file <- read_csv(here(filepath))
+df_raw <- df_file %>% 
+  slice(-1:-2)  %>% 
+  # -- remove columns with all NA -- #
+  select_if(~!all(is.na(.))) %>% 
+  # -- add raw data file name -- #
+  mutate(rawdatafile = filepath) %>% 
+  # -- rename columns -- #
+  codebook_renamer(codebook_vars$qualtrics_var_name, codebook_vars$new_var_name)
+```
+
+## Process data
+
+Note there is an error in the PAQ survey such that there is an extra pos column which I remove in the preproc pipeline.
+
+```{r}
+df_recoded <- df_raw %>% 
+	# -- recode variables -- #
+	codebook_recoder(var_regex=codebook_values$qualtrics_var_name, 
+	                 values_from=codebook_values$src_value,
+	                 values_to=codebook_values$dest_value) %>% 
+  select(-paq_dif_pos_8)
+df_proc <- df_recoded %>%
+  mutate_at(vars(matches("^paq")), as.numeric) %>% 
+  tally_scale("paq.*[0-9]$", "paq") %>% 
+  tally_scale("paq_dif") %>% 
+  tally_scale("paq_ddf") %>% 
+  tally_scale("paq_eot") %>% 
+  tally_scale("paq_.*_neg", "paq_neg") %>% 
+  tally_scale("paq_.*_pos", "paq_pos") %>% 
+  tally_scale("paq_dif_neg") %>% 
+  tally_scale("paq_ddf_neg") %>% 
+  tally_scale("paq_dif_pos") %>% 
+  tally_scale("paq_ddf_pos") 
+  
+  
+```
+
+
+```{r, echo=FALSE}
+# ------ End Preprocessing ------ #
+# ----- Run all chunks above -----#
+```
+
+# 
+```{r}
+filepath_output <- "data/proc/emo_similarity_network_presurvey_sum2021_proc.csv"
+df_proc %>% 
+  write_csv(here(filepath_output))
+```
+
+
+
+
+# Session Info
+```{r}
+sessionInfo()
+```
+
