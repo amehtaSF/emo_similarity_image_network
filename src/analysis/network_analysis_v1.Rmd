@@ -1,0 +1,226 @@
+---
+title: "Analysis"
+author: "Ashish"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    number_sections: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    theme: paper
+---
+# Initialization
+```{r, message=FALSE}
+rm(list=ls())
+library(lmerTest)
+library(igraph)
+library(here)
+library(tidyverse)
+theme_set(theme_bw())
+```
+
+```{r, eval=FALSE}
+library(tidylog)
+```
+
+
+# Preprocessing
+
+## Functions
+```{r}
+scale_numerics <- function(df, new_cols=TRUE, ...){
+  if(new_cols){df %>% mutate_if(is.numeric, list(sc = ~rsurveyutils::scale(., ...)))}
+  else {df %>% mutate_if(is.numeric,  ~scale(., ...))}
+}
+recent_date_dir <- function(directory, recursive=FALSE){
+  files <- list.files(directory, 
+                      pattern="[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}$",
+                      include.dirs=TRUE,
+                      recursive=recursive)
+  files <- sort(as.Date(files), decreasing = TRUE)
+  return(files[1])
+}
+```
+
+## Read data
+```{r, message=FALSE}
+filepath <- paste0("data/raw/", recent_date_dir("data/raw"), "/emotion-similarity-task.csv")
+print(paste("Datafile:", filepath))
+df_raw <- read_csv(here(filepath))
+```
+
+## Process data
+```{r, message=FALSE}
+df_proc <- df_raw %>% 
+  filter(pool == "rep" | pool == "psychone") %>% 
+  # -- remove columns with all NA -- #
+  select_if(~!all(is.na(.))) %>% 
+  # -- keep only trials -- #
+  filter(trial_type == "image-multi-select") %>% 
+  filter(!str_detect(stimuli, "practice_images")) %>% 
+  # -- reformat file name strings -- #
+  mutate(stimuli = str_replace_all(stimuli, '\\[|\\]|\\"', '')) %>% 
+  mutate_at(vars(images_chosen, stimuli), ~str_replace_all(., "/", "_")) %>% 
+  mutate_at(vars(stimuli, images_chosen), ~str_replace_all(., "Stimuli_", "")) %>% 
+  # -- get file names in separate columns -- #
+  separate(stimuli, c("img_file_1", "img_file_2", "img_file_3"), sep=",") %>% 
+  mutate(
+    trial_valence = str_extract(img_file_1, "negative|positive|neutral")
+  ) %>% 
+  # mutate(
+  #   img_valence_1 = str_extract(img_file_1, "negative|positive|neutral"),
+  #   img_valence_2 = str_extract(img_file_2, "negative|positive|neutral"),
+  #   img_valence_3 = str_extract(img_file_3, "negative|positive|neutral"),
+  # ) %>% 
+  # -- get chosen and not chosen file names -- #
+  mutate(imgs_filesChosen = str_replace_all(images_chosen, '\\[|\\]|\\"', '')) %>% 
+  select(-images_chosen) %>% 
+  separate(imgs_filesChosen, c("img_file_chosen_1", "img_file_chosen_2"), sep=",") %>% 
+  mutate(img_file_notChosen = case_when(
+    img_file_1 != img_file_chosen_1 & img_file_1 != img_file_chosen_2 ~ img_file_1,
+    img_file_2 != img_file_chosen_1 & img_file_2 != img_file_chosen_2 ~ img_file_2,
+    img_file_3 != img_file_chosen_1 & img_file_3 != img_file_chosen_2 ~ img_file_3
+  )) %>%
+  
+  # -- get chosen and not chosen file numbers -- #
+  mutate(img_num_chosen_1 = case_when(
+    img_file_chosen_1 == img_file_1 ~ 1,
+    img_file_chosen_1 == img_file_2 ~ 2,
+    img_file_chosen_1 == img_file_3 ~ 3
+  )) %>% 
+  mutate(img_num_chosen_2 = case_when(
+    img_file_chosen_2 == img_file_1 ~ 1,
+    img_file_chosen_2 == img_file_2 ~ 2,
+    img_file_chosen_2 == img_file_3 ~ 3
+  )) %>% 
+  mutate(img_num_notChosen = case_when(
+    img_file_1 != img_file_chosen_1 & img_file_1 != img_file_chosen_2 ~ 1,
+    img_file_2 != img_file_chosen_1 & img_file_2 != img_file_chosen_2 ~ 2,
+    img_file_3 != img_file_chosen_1 & img_file_3 != img_file_chosen_2 ~ 3
+  )) 
+```
+
+```{r}
+df_trials <- df_proc %>% 
+  select(pid, trial_index, trial_valence,
+         img_file_chosen_1, img_file_chosen_2,
+         img_file_1, img_file_2, img_file_3) %>% 
+  pivot_longer(c(img_file_1, img_file_2, img_file_3), values_to="img_file", names_to="label") %>% 
+  mutate(is_chosen=ifelse(img_file == img_file_chosen_1 | img_file == img_file_chosen_2, 1, 0)) %>% 
+  select(-c(img_file_chosen_1, img_file_chosen_2)) %>% 
+  arrange(pid, trial_index, img_file)
+
+df_trials_wide <- df_trials %>% 
+  arrange(pid, trial_index, desc(is_chosen), img_file) %>% 
+  select(-label) %>% 
+  group_by(pid, trial_index) %>% 
+  # mutate(img_num = paste0("img_file_", 1:n())) %>% 
+  mutate(img_num = 1:n()) %>% 
+  ungroup %>% 
+  pivot_wider(id_cols = c(pid, trial_index, trial_valence), names_from = img_num, values_from=c(img_file, is_chosen))
+```
+
+
+
+```{r, echo=FALSE}
+# ------ End Preprocessing ------ #
+# ----- Run all chunks above -----#
+```
+
+# number of participants
+```{r}
+df_proc %>% 
+  group_by(pid) %>% 
+  summarise(n = n())
+
+df_proc %>% pull(pid) %>% unique
+```
+
+# response time distribution
+```{r}
+df_proc %>% 
+  mutate(rt = as.numeric(rt)) %>% 
+  filter(rsurveyutils::scale(rt) < 3) %>% # remove if 3 SDs above mean
+  group_by(pid) %>% 
+  summarize(mean_rt = mean(rt)) %>% 
+  ggplot(aes(x = mean_rt)) + 
+  geom_histogram()
+
+df_proc %>% 
+  mutate(rt = as.numeric(rt)) %>% 
+  filter(rsurveyutils::scale(rt) < 3) %>% # remove if 3 SDs above mean
+  ggplot(aes(x = rt)) + 
+  geom_histogram()
+
+```
+
+# total time spent
+```{r}
+df_proc %>% 
+  group_by(run_id) %>% 
+  filter(time_elapsed == max(time_elapsed)) %>% 
+  ungroup %>% 
+  mutate(mins_elapsed = as.numeric(time_elapsed)/(1000*60)) %>% 
+  ggplot(aes(x = mins_elapsed)) + 
+  geom_histogram()
+```
+
+
+# graph community structure and modularity
+```{r}
+get_graph <- function(df){
+   df %>%
+    select(img_file_1, img_file_2) %>% 
+    graph_from_data_frame(directed=FALSE) 
+}
+
+
+df_graphs <- df_trials_wide %>% 
+  group_by(pid, trial_valence) %>% 
+  nest() %>%
+  mutate(graph = map(data, get_graph)) %>% 
+  mutate(cluster = map(graph, cluster_walktrap)) %>% 
+  mutate(modularity = map_dbl(cluster, modularity)) %>% 
+  # mutate(cluster_plot = map2(cluster, graph, ~plot(.x, .y))) %>% 
+  mutate(n_clusters = map_dbl(cluster, ~length(unique(.$membership))))
+
+# df_graphs %>%
+#   ggplot(aes(x = modularity))
+
+df_graphs %>% 
+  ggplot(aes(y = modularity, x = trial_valence)) + 
+  # geom_point(alpha = .3, position=position_jitter(.1)) +
+  stat_summary(fun.data = "mean_cl_boot") 
+
+df_graphs %>% 
+  lmer(modularity ~ (1|pid), .) %>% 
+  summary
+df_graphs %>% 
+  lmer(modularity ~ trial_valence + (1|pid), .) %>% 
+  summary
+
+  
+
+df_graphs %>% 
+  ggplot(aes(y = n_clusters, x = trial_valence)) + 
+  # geom_point(alpha = .3, position=position_jitter(.1)) + 
+  stat_summary(fun.data = "mean_cl_boot") 
+
+df_graphs %>% 
+  lmer(n_clusters ~ (1|pid), .) %>% 
+  summary
+df_graphs %>% 
+  lmer(n_clusters ~ trial_valence + (1|pid), .) %>% 
+  summary
+
+
+
+```
+
+# Session Info
+```{r}
+sessionInfo()
+```
+

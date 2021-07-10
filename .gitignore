@@ -1,0 +1,55 @@
+# Mac files
+**/*.DS_Store
+
+# PyCharm
+**/*.idea
+
+# Virtualenv
+**/venv/
+**/env/
+
+# RStudio
+**/*.RData
+**/.Ruserdata
+**/.Rhistory
+**/*.Rproj.user
+**/*.Rproj.user*
+# **/*.Rproj
+**/*.Rapp.history
+
+# Big Data
+**/*.db
+**/*.h5
+**/*.hdf5
+
+# Compressed
+**/*.tar
+**/*.zip
+**/*.rar
+
+# Data
+#**/raw/*
+#**/proc/*
+
+# LaTeX/Sweave
+**/*.tex
+**/*.synctex.gz
+
+# PDF
+**/*.pdf
+
+# Logs
+**/*.log
+
+# Authorization keys
+**/*.httr-oauth
+
+# Python Eggs
+*.egg-info/
+
+# Keep READMEs
+!**/README.md
+
+# Keep codebooks
+!**/*codebook**
+.Rproj.user
