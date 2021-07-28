@@ -30,26 +30,26 @@ QID64,gad_5,,,,"Over the last two weeks, how often have you been bothered by:   
 QID65,gad_6,,,,"Over the last two weeks, how often have you been bothered by:   Becoming easily annoyed or irrita...","Over the last two weeks, how often have you been bothered by:         Becoming easily annoyed or irritable?    "
 QID66,gad_7,,,,"Over the last two weeks, how often have you been bothered by:   Feeling afraid, as if something a...","Over the last two weeks, how often have you been bothered by:         Feeling afraid, as if something awful might happen?    "
 QID68,gender,,,,What is your gender identity?,What is your gender identity?
-QID52,panas_1,,,,Please indicate the extent you have felt this way over the past week.,Interested
-QID52,panas_10,,,,Please indicate the extent you have felt this way over the past week.,Proud
-QID52,panas_11,,,,Please indicate the extent you have felt this way over the past week.,Irritable
-QID52,panas_12,,,,Please indicate the extent you have felt this way over the past week.,Alert
-QID52,panas_13,,,,Please indicate the extent you have felt this way over the past week.,Ashamed
-QID52,panas_14,,,,Please indicate the extent you have felt this way over the past week.,Inspired
-QID52,panas_15,,,,Please indicate the extent you have felt this way over the past week.,Nervous
-QID52,panas_16,,,,Please indicate the extent you have felt this way over the past week.,Determined
-QID52,panas_17,,,,Please indicate the extent you have felt this way over the past week.,Attentive
-QID52,panas_18,,,,Please indicate the extent you have felt this way over the past week.,Jittery
-QID52,panas_19,,,,Please indicate the extent you have felt this way over the past week.,Active
-QID52,panas_2,,,,Please indicate the extent you have felt this way over the past week.,Distressed
-QID52,panas_20,,,,Please indicate the extent you have felt this way over the past week.,Afraid
-QID52,panas_3,,,,Please indicate the extent you have felt this way over the past week.,Excited
-QID52,panas_4,,,,Please indicate the extent you have felt this way over the past week.,Upset
-QID52,panas_5,,,,Please indicate the extent you have felt this way over the past week.,Strong
-QID52,panas_6,,,,Please indicate the extent you have felt this way over the past week.,Guilty
-QID52,panas_7,,,,Please indicate the extent you have felt this way over the past week.,Scared
-QID52,panas_8,,,,Please indicate the extent you have felt this way over the past week.,Hostile
-QID52,panas_9,,,,Please indicate the extent you have felt this way over the past week.,Enthusiastic
+QID52,panas_1,panas_pos_1,,,Please indicate the extent you have felt this way over the past week.,Interested
+QID52,panas_10,panas_pos_10,,,Please indicate the extent you have felt this way over the past week.,Proud
+QID52,panas_11,panas_neg_11,,,Please indicate the extent you have felt this way over the past week.,Irritable
+QID52,panas_12,panas_pos_12,,,Please indicate the extent you have felt this way over the past week.,Alert
+QID52,panas_13,panas_neg_13,,,Please indicate the extent you have felt this way over the past week.,Ashamed
+QID52,panas_14,panas_pos_14,,,Please indicate the extent you have felt this way over the past week.,Inspired
+QID52,panas_15,panas_neg_15,,,Please indicate the extent you have felt this way over the past week.,Nervous
+QID52,panas_16,panas_pos_16,,,Please indicate the extent you have felt this way over the past week.,Determined
+QID52,panas_17,panas_pos_17,,,Please indicate the extent you have felt this way over the past week.,Attentive
+QID52,panas_18,panas_neg_18,,,Please indicate the extent you have felt this way over the past week.,Jittery
+QID52,panas_19,panas_pos_19,,,Please indicate the extent you have felt this way over the past week.,Active
+QID52,panas_2,panas_neg_2,,,Please indicate the extent you have felt this way over the past week.,Distressed
+QID52,panas_20,panas_neg_20,,,Please indicate the extent you have felt this way over the past week.,Afraid
+QID52,panas_3,panas_pos_3,,,Please indicate the extent you have felt this way over the past week.,Excited
+QID52,panas_4,panas_neg_4,,,Please indicate the extent you have felt this way over the past week.,Upset
+QID52,panas_5,panas_pos_5,,,Please indicate the extent you have felt this way over the past week.,Strong
+QID52,panas_6,panas_neg_6,,,Please indicate the extent you have felt this way over the past week.,Guilty
+QID52,panas_7,panas_neg_7,,,Please indicate the extent you have felt this way over the past week.,Scared
+QID52,panas_8,panas_neg_8,,,Please indicate the extent you have felt this way over the past week.,Hostile
+QID52,panas_9,panas_pos_9,,,Please indicate the extent you have felt this way over the past week.,Enthusiastic
 QID2,paq_ddf_neg_1,,,,"When I'm feeling bad (feeling an unpleasant emotion), I can't find the right words to describe th...","When I'm feeling bad (feeling an unpleasant emotion), I can't find the right words to describe those feelings."
 QID3,paq_dif_neg_2,,,,"When I'm feeling bad, I can't tell whether I'm sad, angry, or scared.","When I'm feeling  bad, I can't tell whether I'm sad, angry, or scared."
 QID4,pas_eot_gen_3,paq_eot_gen_3,,,I tend to ignore how I feel.,I tend to ignore how I feel.

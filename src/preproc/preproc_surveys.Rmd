@@ -33,12 +33,12 @@ recent_date_dir <- function(directory, recursive=FALSE){
 ## Read data
 ```{r}
 data_dir <- recent_date_dir(here("data/raw/emo_similarity_network_presurvey_sum2021"))
-codebook_vars_filepath <- paste0(data_dir, 
+codebook_vars_filepath <- paste0("data/raw/emo_similarity_network_presurvey_sum2021", 
                                  "/emo_similarity_network_presurvey_sum2021_var_codebook.csv")
-codebook_values_filepath <- paste0(data_dir,
+codebook_values_filepath <- paste0("data/raw/emo_similarity_network_presurvey_sum2021",
                                 "/emo_similarity_network_presurvey_sum2021_value_codebook.csv")
-codebook_vars <- read_csv(codebook_vars_filepath)
-codebook_values <- read_csv(codebook_values_filepath)
+codebook_vars <- read_csv(here(codebook_vars_filepath))
+codebook_values <- read_csv(here(codebook_values_filepath))
 
 filepath <- paste0(data_dir, "/emo_similarity_network_presurvey_sum2021.csv")
 df_file <- read_csv(here(filepath))
@@ -54,7 +54,7 @@ df_raw <- df_file %>%
 
 ## Process data
 
-Note there is an error in the PAQ survey such that there is an extra pos column which I remove in the preproc pipeline.
+Note there is an error in the PAQ survey such that there is an extra pos column which I remove in the preproc pipeline. This also means we're missing 1 DIF neg column.
 
 ```{r}
 df_recoded <- df_raw %>% 
@@ -74,7 +74,19 @@ df_proc <- df_recoded %>%
   tally_scale("paq_dif_neg") %>% 
   tally_scale("paq_ddf_neg") %>% 
   tally_scale("paq_dif_pos") %>% 
-  tally_scale("paq_ddf_pos") 
+  tally_scale("paq_ddf_pos") %>% 
+  tally_scale("tas_.*[0-9](_r)?$", "tas") %>% 
+  tally_scale("tas_dif.*[0-9](_r)?$", "tas_dif") %>% 
+  tally_scale("tas_ddf.*[0-9](_r)?$", "tas_ddf") %>% 
+  tally_scale("tas_eot.*[0-9](_r)?$", "tas_eot") %>% 
+  tally_scale("erq_reap_fr") %>% 
+  tally_scale("erq_supp_fr") %>% 
+  tally_scale("gad_[0-9]", "gad") %>% 
+  tally_scale("phq_[0-9]", "phq") %>% 
+  tally_scale("fss_[0-9]", "fss") %>% 
+  # tally_scale("panas_pos") %>% 
+  # tally_scale("panas_neg") %>% 
+  tally_scale("swls_[0-9]", "swls") 
   
   
 ```
