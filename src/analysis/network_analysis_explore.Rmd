@@ -11,7 +11,9 @@ output:
       smooth_scroll: false
     theme: paper
 ---
+
 # Initialization
+
 ```{r, message=FALSE}
 rm(list=ls())
 library(lmerTest)
@@ -25,10 +27,10 @@ theme_set(theme_bw())
 library(tidylog)
 ```
 
-
 # Preprocessing
 
 ## Functions
+
 ```{r}
 scale_numerics <- function(df, new_cols=TRUE, ...){
   if(new_cols){df %>% mutate_if(is.numeric, list(sc = ~rsurveyutils::scale(., ...)))}
@@ -40,18 +42,31 @@ recent_date_dir <- function(directory, recursive=FALSE){
                       include.dirs=TRUE,
                       recursive=recursive)
   files <- sort(as.Date(files), decreasing = TRUE)
-  return(files[1])
+  date_dir_path <- paste0(directory, "/", files[1])
+  return(date_dir_path)
 }
 ```
 
-## Read data
+## Read & process survey data
+
 ```{r, message=FALSE}
-filepath <- paste0("data/raw/", recent_date_dir("data/raw"), "/emotion-similarity-task.csv")
+filepath <- paste0(recent_date_dir(here("data/raw/emotion_similarity_task")), 
+                   "/emotion-similarity-task.csv")
 print(paste("Datafile:", filepath))
-df_raw <- read_csv(here(filepath))
+df_raw <- read_csv(filepath)
+
+
+survey_filepath <- "data/proc/emo_similarity_network_presurvey_sum2021_proc.csv"
+df_survey_raw <- read_csv(here(survey_filepath))
+df_survey <- df_survey_raw %>% 
+  group_by(pid) %>%
+  filter((all(ac_paq_pass == 1) & all(ac_pmerq_pass == 1) & all(ac_tas_pass == 1))) %>%
+  # filter(ac_paq_pass == 1 & ac_pmerq_pass == 1 & ac_tas_pass == 1) %>% 
+  ungroup
 ```
 
-## Process data
+## create first stage task processing dataframe
+
 ```{r, message=FALSE}
 df_proc <- df_raw %>% 
   filter(pool == "rep" | pool == "psychone") %>% 
@@ -129,7 +144,8 @@ df_proc <- df_raw %>%
 
 ```
 
-# forced choice attention check
+## data frame of forced choice attention check
+
 ```{r}
 df_ac_fc <- df_proc %>% 
   drop_na(ac_forceChoice) %>% 
@@ -147,6 +163,8 @@ ac_fail_pids <- df_ac_fc %>%
 #   filter(pool == "rep" & pr_correct < .33)
   
 ```
+
+## Get data frame of task trials
 
 ```{r}
 df_trials <- df_proc %>% 
@@ -176,14 +194,33 @@ df_trials_wide <- df_trials %>%
   pivot_wider(id_cols = c(pid, trial_index, trial_valence), names_from = img_num, values_from=c(img_file, is_chosen))
 ```
 
+# graph community structure and fit clustering
 
+```{r}
+get_graph <- function(df){
+   df %>%
+    select(img_file_1, img_file_2) %>% 
+    graph_from_data_frame(directed=FALSE) 
+}
 
+df_graphs <- df_trials_wide %>% 
+  group_by(pid, trial_valence) %>% 
+  nest() %>%
+  mutate(graph = map(data, get_graph)) %>% 
+  mutate(cluster = map(graph, cluster_walktrap)) %>% 
+  mutate(modularity = map_dbl(cluster, modularity)) %>% 
+  # mutate(cluster_plot = map2(cluster, graph, ~plot(.x, .y))) %>% 
+  mutate(n_clusters = map_dbl(cluster, ~length(unique(.$membership))))
+```
+
+# END PREPROC
 ```{r, echo=FALSE}
 # ------ End Preprocessing ------ #
 # ----- Run all chunks above -----#
 ```
 
 # number of participants
+
 ```{r}
 df_proc %>% 
   group_by(pid) %>% 
@@ -193,6 +230,7 @@ df_proc %>% pull(pid) %>% unique
 ```
 
 # response time distribution
+
 ```{r}
 # participant mean response time
 df_proc %>% 
@@ -222,6 +260,7 @@ df_proc %>%
 ```
 
 # total time spent on survey
+
 ```{r}
 df_proc %>% 
   group_by(run_id) %>% 
@@ -241,55 +280,45 @@ df_proc %>%
 
 ```
 
-
-
-# graph community structure and fit clustering
-```{r}
-get_graph <- function(df){
-   df %>%
-    select(img_file_1, img_file_2) %>% 
-    graph_from_data_frame(directed=FALSE) 
-}
-
-df_graphs <- df_trials_wide %>% 
-  group_by(pid, trial_valence) %>% 
-  nest() %>%
-  mutate(graph = map(data, get_graph)) %>% 
-  mutate(cluster = map(graph, cluster_walktrap)) %>% 
-  mutate(modularity = map_dbl(cluster, modularity)) %>% 
-  # mutate(cluster_plot = map2(cluster, graph, ~plot(.x, .y))) %>% 
-  mutate(n_clusters = map_dbl(cluster, ~length(unique(.$membership))))
-```
-
 # plot all participant clusters
+
 ```{r eval=FALSE}
 clusterPlots_dir <- here(paste0("results/", Sys.Date(), "/clusterPlots"))
 dir.create(clusterPlots_dir, recursive=TRUE)
 pdf(paste0(clusterPlots_dir, "/pid_valence_clusterPlots.pdf"))
 for(i in 1:nrow(df_graphs)){
   # plot of clusters
-  plot(df_graphs$cluster[[i]], 
+  plot(df_graphs$cluster[[i]],
        df_graphs$graph[[i]],
        main=paste(df_graphs$pid[i], df_graphs$trial_valence[i]))
   # get free response dimensions of clustering
-  freeResp <- df_proc %>% 
-    filter(pid == df_graphs$pid[[i]]) %>% 
-    filter(ac_freeResp != "") %>% 
-    filter(trial_valence == df_graphs$trial_valence[[i]]) %>% 
+  freeResp <- df_proc %>%
+    filter(pid == df_graphs$pid[[i]]) %>%
+    filter(ac_freeResp != "") %>%
+    filter(trial_valence == df_graphs$trial_valence[[i]]) %>%
     pull(ac_freeResp)
   if(length(freeResp) > 0){
     text(0,-1.4, labels=paste(freeResp, collapse = "\n"))
   }
   # get attention check score
-  pr_correct <- df_ac_fc %>% 
-    filter(pid == df_graphs$pid[[i]]) %>% 
+  pr_correct <- df_ac_fc %>%
+    filter(pid == df_graphs$pid[[i]]) %>%
     pull(pr_correct)
   text(-1.2,1.3, labels=paste("AC correct pr:", round(pr_correct, 2)))
+  # get PAQ score
+  paq_score <- df_survey %>%
+    mutate(paq = rsurveyutils::scale(paq)) %>%
+    filter(pid == df_graphs$pid[[i]]) %>%
+    pull(paq)
+    text(-1.2,seq(1.1, by = -.1, length.out = length(paq_score)),
+         labels=paste("PAQ:", round(paq_score, 2)))
+
 }
 dev.off()
 ```
 
 # Modularity by trial valence
+
 ```{r}
 df_graphs %>% 
   ggplot(aes(y = modularity, x = trial_valence)) + 
@@ -305,6 +334,7 @@ df_graphs %>%
 ```
 
 # Clusters by trial valence
+
 ```{r}
 df_graphs %>% 
   ggplot(aes(y = n_clusters, x = trial_valence)) + 
@@ -320,15 +350,260 @@ df_graphs %>%
 
 ```
 
-
-# explanations of why they chose what they did
 ```{r}
-df_proc
+cor.test(df_graphs$modularity, df_graphs$n_clusters)
+```
+
+# relation of modularity to alexithymia
+
+```{r}
+dat <- df_survey %>% 
+  select(pid, paq) %>% 
+  inner_join(df_graphs)
+
+dat %>% 
+  ggplot(aes(x = paq, y = modularity, color = trial_valence)) + 
+  geom_point(alpha = .3) + 
+  geom_smooth(method="lm")
+
+# dat %>% 
+#   lmer(modularity ~ paq + (1|pid), .) %>% 
+#   summary
+```
+
+# Relation of n clusters to variables
+
+## Alexithymia
+
+```{r}
+dat <- df_survey %>% 
+  select(pid, matches("paq(.*[^0-9]$|$)")) %>% 
+  inner_join(df_graphs)
+
+## Full scale
+dat %>% 
+  ggplot(aes(x = paq, y = n_clusters, color = trial_valence)) + 
+  geom_point(alpha = .3) + 
+  geom_smooth(method="lm")
+dat %>% 
+  filter(trial_valence == "negative") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(n_clusters ~ paq, .) %>% 
+  summary
+dat %>% 
+  filter(trial_valence == "neutral") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(n_clusters ~ paq, .) %>% 
+  summary
+dat %>% 
+  filter(trial_valence == "positive") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(n_clusters ~ paq, .) %>% 
+  summary
+
+## DIF
+
+dat %>% 
+  ggplot(aes(x = paq_dif, y = n_clusters, color = trial_valence)) + 
+  geom_point(alpha = .3) + 
+  geom_smooth(method="lm")
+dat %>% 
+  ggplot(aes(x = paq_ddf, y = n_clusters, color = trial_valence)) + 
+  geom_point(alpha = .3) + 
+  geom_smooth(method="lm")
+
+## EOT
+dat %>% 
+  ggplot(aes(x = paq_eot, y = n_clusters, color = trial_valence)) + 
+  geom_point(alpha = .3) + 
+  geom_smooth(method="lm")
+
+## Pos
+dat %>% 
+  ggplot(aes(x = paq_pos, y = n_clusters, color = trial_valence)) + 
+  geom_point(alpha = .3) + 
+  geom_smooth(method="lm")
+
+## Neg
+dat %>% 
+  ggplot(aes(x = paq_neg, y = n_clusters, color = trial_valence)) + 
+  geom_point(alpha = .3) + 
+  geom_smooth(method="lm")
+
+
+
+```
+
+## ERQ Reappraisal
+```{r}
+dat <- df_survey %>% 
+  select(pid, matches("^erq(.*[^0-9]$|$)")) %>% 
+  inner_join(df_graphs)
+
+dat %>% 
+  ggplot(aes(x = erq_reap_fr, y = n_clusters, color = trial_valence)) + 
+  geom_point(alpha = .3) + 
+  geom_smooth(method="lm")
+dat %>% 
+  filter(trial_valence == "negative" ) %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(n_clusters ~ erq_reap_fr, . ) %>% 
+  summary
+
+dat %>% 
+  filter(trial_valence == "negative" | trial_valence == "neutral") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(n_clusters ~ erq_reap_fr*trial_valence, . ) %>% 
+  summary
+
+```
+
+## ERQ suppression
+```{r}
+dat <- df_survey %>% 
+  select(pid, matches("^erq(.*[^0-9]$|$)")) %>% 
+  inner_join(df_graphs)
+
+dat %>% 
+  ggplot(aes(x = erq_supp_fr, y = n_clusters, color = trial_valence)) + 
+  geom_point(alpha = .3) + 
+  geom_smooth(method="lm")
+dat %>% 
+  filter(trial_valence == "negative" ) %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(n_clusters ~ erq_supp_fr, . ) %>% 
+  summary
+
+dat %>% 
+  filter(trial_valence == "negative" | trial_valence == "neutral") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(n_clusters ~ erq_supp_fr*trial_valence, . ) %>% 
+  summary
+
+```
+
+## PHQ
+```{r}
+dat <- df_survey %>% 
+  select(pid, matches("^phq(.*[^0-9]$|$)"), -matches("timer")) %>% 
+  inner_join(df_graphs)
+
+dat %>% 
+  ggplot(aes(x = phq, y = n_clusters, color = trial_valence)) + 
+  geom_point(alpha = .3, position = position_dodge(.6)) + 
+  geom_smooth(method="lm")
+dat %>% 
+  filter(trial_valence == "negative" ) %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(n_clusters ~ phq, . ) %>% 
+  summary
+
+dat %>% 
+  filter(trial_valence == "negative" | trial_valence == "neutral") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(n_clusters ~ phq*trial_valence, . ) %>% 
+  summary
+
+```
+
+## GAD
+```{r}
+dat <- df_survey %>% 
+  select(pid, matches("^gad(.*[^0-9]$|$)"), -matches("timer")) %>% 
+  inner_join(df_graphs)
+
+dat %>% 
+  ggplot(aes(x = gad, y = n_clusters, color = trial_valence)) + 
+  geom_point(alpha = .3, position = position_dodge(.6)) + 
+  geom_smooth(method="lm")
+dat %>% 
+  filter(trial_valence == "negative" ) %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(n_clusters ~ gad, . ) %>% 
+  summary
+
+dat %>% 
+  filter(trial_valence == "negative" | trial_valence == "neutral") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(n_clusters ~ gad*trial_valence, . ) %>% 
+  summary
+
+```
+
+## Fatigue
+```{r}
+dat <- df_survey %>% 
+  select(pid, matches("^fss(.*[^0-9]$|$)"), -matches("timer")) %>% 
+  inner_join(df_graphs)
+
+dat %>% 
+  ggplot(aes(x = fss, y = n_clusters, color = trial_valence)) + 
+  geom_point(alpha = .3, position = position_dodge(.6)) + 
+  geom_smooth(method="lm")
+dat %>% 
+  filter(trial_valence == "negative" ) %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(n_clusters ~ fss, . ) %>% 
+  summary
+dat %>% 
+  filter(trial_valence == "positive" ) %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(n_clusters ~ fss, . ) %>% 
+  summary
+
+dat %>% 
+  filter(trial_valence == "negative" | trial_valence == "neutral") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(n_clusters ~ gad*trial_valence, . ) %>% 
+  summary
+
+```
+
+# Is alx related to psychopathology controlling for n clusters?
+* not a lot of shared variance it seems
+```{r}
+dat <- df_survey %>% 
+  select(pid, matches("^paq(.*[^0-9]$|$)"), phq, gad, -matches("timer")) %>% 
+  inner_join(df_graphs)
+
+cor.test(df_survey$paq, df_survey$phq)
+cor.test(df_survey$paq_dif, df_survey$phq)
+cor.test(df_survey$paq_ddf, df_survey$phq)
+cor.test(df_survey$paq_eot, df_survey$phq)
+cor.test(df_survey$paq, df_survey$gad)
+cor.test(df_survey$paq_dif, df_survey$gad)
+cor.test(df_survey$paq_ddf, df_survey$gad)
+cor.test(df_survey$paq_eot, df_survey$gad)
+
+dat %>% 
+  filter(trial_valence == "negative") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(phq ~ n_clusters, .) %>% 
+  summary
+dat %>% 
+  filter(trial_valence == "negative") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(phq ~ paq, .) %>% 
+  summary
+dat %>% 
+  filter(trial_valence == "negative") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(phq ~ n_clusters + paq, .) %>% 
+  summary
+
 ```
 
 
+
+
+# explanations of why they chose what they did
+
+```{r}
+
+```
+
 # Session Info
+
 ```{r}
 sessionInfo()
 ```
-
