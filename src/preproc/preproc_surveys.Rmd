@@ -1,5 +1,5 @@
 ---
-title: "Preprocessing script"
+title: "Preprocessing presurveys"
 author: "Ashish"
 date: "`r Sys.Date()`"
 output: rmdformats::readthedown
@@ -14,8 +14,8 @@ library(tidylog)
 theme_set(theme_bw())
 ```
 
-
 # Preprocessing
+
 ## Functions
 ```{r}
 recent_date_dir <- function(directory, recursive=FALSE){
@@ -91,21 +91,17 @@ df_proc <- df_recoded %>%
   
 ```
 
-
 ```{r, echo=FALSE}
 # ------ End Preprocessing ------ #
 # ----- Run all chunks above -----#
 ```
 
-# 
+# Export data
 ```{r}
 filepath_output <- "data/proc/emo_similarity_network_presurvey_sum2021_proc.csv"
 df_proc %>% 
   write_csv(here(filepath_output))
 ```
-
-
-
 
 # Session Info
 ```{r}
