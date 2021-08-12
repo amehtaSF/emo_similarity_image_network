@@ -1,5 +1,5 @@
 ---
-title: "Analysis"
+title: "Exploratory analysis of emotion similarity networks"
 author: "Ashish"
 date: "`r Sys.Date()`"
 output:
@@ -11,6 +11,8 @@ output:
       smooth_scroll: false
     theme: paper
 ---
+
+In this document, I am conducting exploratory analyses of the recently developed emotion similarity network task. In the task, participants select which two of a set of three emotional images are most similar in their emotional quality. I hypothesize that participants who exhibit self-report characteristics of greater emotional awareness will have more distinct communities in a within person network analysis of each participants' similarity structure.
 
 # Initialization
 
@@ -32,122 +34,54 @@ library(tidylog)
 ## Functions
 
 ```{r}
+#' scale_numerics
+#' 
+#' z-scores values of all numeric columns
+#' 
+#' @param df input dataframe
+#' @param new_cols boolean indicating whether to create new columns when scaling or scale in place
+#' @param ... arguments to be passed to rsurveyutils::scale()
+#'
+#' @return dataframe with scaled values
 scale_numerics <- function(df, new_cols=TRUE, ...){
+  
   if(new_cols){df %>% mutate_if(is.numeric, list(sc = ~rsurveyutils::scale(., ...)))}
   else {df %>% mutate_if(is.numeric,  ~scale(., ...))}
 }
-recent_date_dir <- function(directory, recursive=FALSE){
-  files <- list.files(directory, 
-                      pattern="[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}$",
-                      include.dirs=TRUE,
-                      recursive=recursive)
-  files <- sort(as.Date(files), decreasing = TRUE)
-  date_dir_path <- paste0(directory, "/", files[1])
-  return(date_dir_path)
-}
+
 ```
 
+
 ## Read & process survey data
-
 ```{r, message=FALSE}
-filepath <- paste0(recent_date_dir(here("data/raw/emotion_similarity_task")), 
-                   "/emotion-similarity-task.csv")
-print(paste("Datafile:", filepath))
-df_raw <- read_csv(filepath)
-
-
 survey_filepath <- "data/proc/emo_similarity_network_presurvey_sum2021_proc.csv"
 df_survey_raw <- read_csv(here(survey_filepath))
 df_survey <- df_survey_raw %>% 
   group_by(pid) %>%
-  filter((all(ac_paq_pass == 1) & all(ac_pmerq_pass == 1) & all(ac_tas_pass == 1))) %>%
-  # filter(ac_paq_pass == 1 & ac_pmerq_pass == 1 & ac_tas_pass == 1) %>% 
+  # -- remove failed attention checks -- #
+  filter((all(ac_paq_pass == 1) & all(ac_pmerq_pass == 1) & all(ac_tas_pass == 1))) %>% 
   ungroup
 ```
 
-## create first stage task processing dataframe
-
+## Read & process task data
 ```{r, message=FALSE}
-df_proc <- df_raw %>% 
-  filter(pool == "rep" | pool == "psychone") %>% 
-  filter(nchar(pid) >= 4) %>% 
-  # -- remove columns with all NA -- #
-  select_if(~!all(is.na(.))) %>% 
-  # -- keep only trials -- #
-  # filter(trial_type == "image-multi-select") %>% 
-  # filter(!str_detect(stimuli, "practice_images")) %>% 
-  # -- reformat file name strings -- #
-  mutate(stimuli = str_replace_all(stimuli, '\\[|\\]|\\"', '')) %>% 
-  mutate_at(vars(images_chosen, stimuli), ~str_replace_all(., "/", "_")) %>% 
-  mutate_at(vars(stimuli, images_chosen), ~str_replace_all(., "Stimuli_", "")) %>% 
-  # -- get file names in separate columns -- #
-  separate(stimuli, c("img_file_1", "img_file_2", "img_file_3"), sep=",") %>% 
-  mutate(
-    trial_valence = str_extract(img_file_1, "negative|positive|neutral")
-  ) %>% 
-  # mutate(
-  #   img_valence_1 = str_extract(img_file_1, "negative|positive|neutral"),
-  #   img_valence_2 = str_extract(img_file_2, "negative|positive|neutral"),
-  #   img_valence_3 = str_extract(img_file_3, "negative|positive|neutral"),
-  # ) %>% 
-  # -- get chosen and not chosen file names -- #
-  mutate(imgs_filesChosen = str_replace_all(images_chosen, '\\[|\\]|\\"', '')) %>% 
-  select(-images_chosen) %>% 
-  separate(imgs_filesChosen, c("img_file_chosen_1", "img_file_chosen_2"), sep=",") %>% 
-  mutate(img_file_notChosen = case_when(
-    img_file_1 != img_file_chosen_1 & img_file_1 != img_file_chosen_2 ~ img_file_1,
-    img_file_2 != img_file_chosen_1 & img_file_2 != img_file_chosen_2 ~ img_file_2,
-    img_file_3 != img_file_chosen_1 & img_file_3 != img_file_chosen_2 ~ img_file_3
-  )) %>%
-  
-  # -- get chosen and not chosen file numbers -- #
-  mutate(img_num_chosen_1 = case_when(
-    img_file_chosen_1 == img_file_1 ~ 1,
-    img_file_chosen_1 == img_file_2 ~ 2,
-    img_file_chosen_1 == img_file_3 ~ 3
-  )) %>% 
-  mutate(img_num_chosen_2 = case_when(
-    img_file_chosen_2 == img_file_1 ~ 1,
-    img_file_chosen_2 == img_file_2 ~ 2,
-    img_file_chosen_2 == img_file_3 ~ 3
-  )) %>% 
-  mutate(img_num_notChosen = case_when(
-    img_file_1 != img_file_chosen_1 & img_file_1 != img_file_chosen_2 ~ 1,
-    img_file_2 != img_file_chosen_1 & img_file_2 != img_file_chosen_2 ~ 2,
-    img_file_3 != img_file_chosen_1 & img_file_3 != img_file_chosen_2 ~ 3
-  )) %>% 
-  # -- attention checks -- #
-  # ac free response
-  mutate(ac_freeResp = ifelse(str_detect(responses, "ac_1"), responses, "")) %>% 
-  mutate(ac_freeResp = str_replace_all(ac_freeResp, '[\\{\\}\\"]', "")) %>% 
-  mutate(ac_freeResp = str_replace_all(ac_freeResp, "ac_1:", "")) %>% 
-  mutate(trial_valence = ifelse(ac_freeResp != "", lag(trial_valence), trial_valence)) %>% 
-  # ac forced choice
-  mutate(ac_forceChoice_file =  ifelse(str_detect(responses, "ac_2"), responses, "")) %>% 
-  mutate(ac_forceChoice_file = str_replace_all(ac_forceChoice_file, 
-                                               '[\\{\\}\\"]', 
-                                               "")) %>% 
-  mutate(ac_forceChoice_file = str_replace_all(ac_forceChoice_file, 
-                                               "ac_2:.*img src =", 
-                                               "")) %>% 
-  mutate(ac_forceChoice_file = str_replace_all(ac_forceChoice_file, 
-                                               " width=266.66 height=200>",
-                                               "")) %>%
-  mutate(ac_forceChoice_file = str_replace_all(ac_forceChoice_file,
-                                               "/", 
-                                               "_")) %>% 
-  mutate(ac_forceChoice_file = str_replace_all(ac_forceChoice_file, 
-                                               "Stimuli_",
-                                               "")) %>% 
-  mutate(ac_forceChoice = ifelse(lag(img_file_notChosen) == ac_forceChoice_file, 1, 0)) %>% 
-  mutate(ac_forceChoice = ifelse(ac_forceChoice_file == "", NA, ac_forceChoice)) 
+task_filepath <- "data/proc/emoSimilarityTask_proc.csv"
 
+df_task_raw <- read_csv(here(task_filepath))
+
+df_task <- df_task_raw
 ```
 
-## data frame of forced choice attention check
+## Create data frame of forced choice attention checks
+
+Currently using a .33 minimum threshold of passing attention checks
+
+.33 = 4 correct out of 12, 15% chance of passing threshold if you're guessing
 
 ```{r}
-df_ac_fc <- df_proc %>% 
+ac_minimum_threshold <- .33
+
+df_ac_fc <- df_task %>% 
   drop_na(ac_forceChoice) %>% 
   group_by(pid, pool) %>% 
   summarize(pr_correct = mean(ac_forceChoice)) %>% 
@@ -156,7 +90,7 @@ df_ac_fc %>%
   ggplot(aes(x = pr_correct)) + 
   geom_histogram()
 ac_fail_pids <- df_ac_fc %>% 
-  filter(pr_correct < .33) %>% # .33 = 4 correct out of 12, 15% chance if guessing
+  filter(pr_correct < ac_minimum_threshold) %>% 
   pull(pid)
 
 # df_ac_fc %>% 
@@ -164,10 +98,10 @@ ac_fail_pids <- df_ac_fc %>%
   
 ```
 
-## Get data frame of task trials
+## Create data frame of task trials
 
 ```{r}
-df_trials <- df_proc %>% 
+df_trials <- df_task %>% 
   # -- keep only trials -- #
   filter(trial_type == "image-multi-select") %>%
   filter(!str_detect(img_file_1, "practice_images")) %>%
@@ -194,7 +128,7 @@ df_trials_wide <- df_trials %>%
   pivot_wider(id_cols = c(pid, trial_index, trial_valence), names_from = img_num, values_from=c(img_file, is_chosen))
 ```
 
-# graph community structure and fit clustering
+# Create graphs community structure and fit clustering
 
 ```{r}
 get_graph <- function(df){
@@ -213,45 +147,37 @@ df_graphs <- df_trials_wide %>%
   mutate(n_clusters = map_dbl(cluster, ~length(unique(.$membership))))
 ```
 
-# END PREPROC
 ```{r, echo=FALSE}
 # ------ End Preprocessing ------ #
 # ----- Run all chunks above -----#
 ```
 
-# number of participants
+# Sample characteristics
+
+## Number of participants
 
 ```{r}
-df_proc %>% 
+df_task %>% 
   group_by(pid) %>% 
   summarise(n = n())
 
-df_proc %>% pull(pid) %>% unique
+df_task %>% pull(pid) %>% unique
 ```
 
-# response time distribution
+## Response time distribution
 
 ```{r}
 # participant mean response time
-df_proc %>% 
+df_task %>% 
   mutate(rt = as.numeric(rt)/1000) %>% 
-  filter(rsurveyutils::scale(rt) < 3) %>% # remove if 3 SDs above mean
+  filter(rsurveyutils::scale(rt) < 3) %>% # remove outliers if 3 SDs above mean
   group_by(pid) %>% 
   summarize(mean_rt = mean(rt)) %>% 
   ggplot(aes(x = mean_rt)) + 
   geom_histogram()
 
-# df_proc %>% 
-#   filter(pid == "96301") %>% 
-#   mutate(rt = as.numeric(rt)) %>% 
-#   filter(rsurveyutils::scale(rt) < 3) %>% # remove if 3 SDs above mean
-#   group_by(pid) %>% 
-#   summarize(mean_rt = mean(rt)) %>% 
-#   ggplot(aes(x = mean_rt)) + 
-#   geom_histogram()
-
 # trial response time
-df_proc %>% 
+df_task %>% 
   mutate(rt = as.numeric(rt)/1000) %>% 
   filter(rsurveyutils::scale(rt) < 3) %>% # remove if 3 SDs above mean
   ggplot(aes(x = rt)) + 
@@ -259,10 +185,10 @@ df_proc %>%
 
 ```
 
-# total time spent on survey
+## Plot total time spent on survey
 
 ```{r}
-df_proc %>% 
+df_task %>% 
   group_by(run_id) %>% 
   filter(time_elapsed == max(time_elapsed)) %>% 
   ungroup %>% 
@@ -270,17 +196,11 @@ df_proc %>%
   ggplot(aes(x = mins_elapsed)) + 
   geom_histogram()
 
-# df_proc %>% 
-#   filter(pid == "96301") %>% 
-#   filter(time_elapsed == max(time_elapsed)) %>% 
-#   ungroup %>% 
-#   mutate(mins_elapsed = as.numeric(time_elapsed)/(1000*60)) %>% 
-#   ggplot(aes(x = mins_elapsed)) + 
-#   geom_histogram()
-
 ```
 
-# plot all participant clusters
+# Plot all participant networks and clusters and export to PDF
+
+I'm also including their PAQ score and their responses to the attention checks in the within person network PDFs.
 
 ```{r eval=FALSE}
 clusterPlots_dir <- here(paste0("results/", Sys.Date(), "/clusterPlots"))
@@ -292,7 +212,7 @@ for(i in 1:nrow(df_graphs)){
        df_graphs$graph[[i]],
        main=paste(df_graphs$pid[i], df_graphs$trial_valence[i]))
   # get free response dimensions of clustering
-  freeResp <- df_proc %>%
+  freeResp <- df_task %>%
     filter(pid == df_graphs$pid[[i]]) %>%
     filter(ac_freeResp != "") %>%
     filter(trial_valence == df_graphs$trial_valence[[i]]) %>%
@@ -350,11 +270,13 @@ df_graphs %>%
 
 ```
 
+# Relationship between modularity metric and number of clusters metric
+
 ```{r}
 cor.test(df_graphs$modularity, df_graphs$n_clusters)
 ```
 
-# relation of modularity to alexithymia
+# Relation of modularity to alexithymia
 
 ```{r}
 dat <- df_survey %>% 
@@ -407,6 +329,8 @@ dat %>%
   ggplot(aes(x = paq_dif, y = n_clusters, color = trial_valence)) + 
   geom_point(alpha = .3) + 
   geom_smooth(method="lm")
+
+# DDF
 dat %>% 
   ggplot(aes(x = paq_ddf, y = n_clusters, color = trial_valence)) + 
   geom_point(alpha = .3) + 
@@ -418,18 +342,49 @@ dat %>%
   geom_point(alpha = .3) + 
   geom_smooth(method="lm")
 
-## Pos
+## PAQ Pos
 dat %>% 
   ggplot(aes(x = paq_pos, y = n_clusters, color = trial_valence)) + 
   geom_point(alpha = .3) + 
   geom_smooth(method="lm")
+dat %>% 
+  filter(trial_valence == "negative") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(n_clusters ~ paq_pos, .) %>% 
+  summary
+dat %>% 
+  filter(trial_valence == "neutral") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(n_clusters ~ paq_pos, .) %>% 
+  summary
+dat %>% 
+  filter(trial_valence == "positive") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(n_clusters ~ paq_pos, .) %>% 
+  summary
+  
 
-## Neg
+## PAQ Neg 
 dat %>% 
   ggplot(aes(x = paq_neg, y = n_clusters, color = trial_valence)) + 
   geom_point(alpha = .3) + 
   geom_smooth(method="lm")
-
+dat %>% 
+  filter(trial_valence == "negative") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(n_clusters ~ paq_neg, .) %>% 
+  summary
+dat %>% 
+  filter(trial_valence == "neutral") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(n_clusters ~ paq_neg, .) %>% 
+  summary
+dat %>% 
+  filter(trial_valence == "positive") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(n_clusters ~ paq_neg, .) %>% 
+  summary
+  
 
 
 ```
@@ -554,13 +509,15 @@ dat %>%
 dat %>% 
   filter(trial_valence == "negative" | trial_valence == "neutral") %>% 
   mutate_if(is.numeric, scale) %>% 
-  lm(n_clusters ~ gad*trial_valence, . ) %>% 
+  lm(n_clusters ~ fss*trial_valence, . ) %>% 
   summary
 
 ```
 
 # Is alx related to psychopathology controlling for n clusters?
-* not a lot of shared variance it seems
+
+* There is not a lot of shared variance it seems. This is surprising since I would think that the schema differences reflected by n_clusters would explain why n_clusters is also related to psychopathology.
+
 ```{r}
 dat <- df_survey %>% 
   select(pid, matches("^paq(.*[^0-9]$|$)"), phq, gad, -matches("timer")) %>% 
@@ -593,10 +550,7 @@ dat %>%
 
 ```
 
-
-
-
-# explanations of why they chose what they did
+# Explanations of why they chose what they did
 
 ```{r}
 
