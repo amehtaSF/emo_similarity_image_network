@@ -1,5 +1,5 @@
 
-#all: results/analysis.html
+all: analysis
 	
 
 FORCE:
@@ -10,9 +10,11 @@ clean:
 
 # -- Analyze data -- #
 
-#analysis: results/analysis.html
+analysis: results/network_analysis_explore.html
 
-results/%.html: src/analysis/%.Rmd
+results/network_analysis_explore.html: src/analysis/network_analysis_explore.Rmd \
+data/proc/emo_similarity_network_presurvey_sum2021_proc.csv \
+data/proc/emoSimilarityTask_proc.csv
 	Rscript -e 'rmarkdown::render("$<", output_dir="results")'
 
 # -- Preprocess data -- #
@@ -23,6 +25,10 @@ data/proc/emo_similarity_network_presurvey_sum2021_proc.csv: src/preproc/preproc
 data/raw/emo_similarity_network_presurvey_sum2021/emo_similarity_network_presurvey_sum2021_value_codebook.csv \
 data/raw/emo_similarity_network_presurvey_sum2021/emo_similarity_network_presurvey_sum2021_var_codebook.csv
 	Rscript -e 'rmarkdown::render("$<")'
+
+data/proc/emoSimilarityTask_proc.csv: src/preproc/preproc_emoSimilarityTask.Rmd
+	Rscript -e 'rmarkdown::render("$<")'
+
 
 # -- Gather data -- #
 
