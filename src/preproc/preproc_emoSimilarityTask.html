@@ -11,7 +11,7 @@
 
 <meta name="author" content="Ashish" />
 
-<meta name="date" content="2021-08-12" />
+<meta name="date" content="2021-08-13" />
 
 <title>Preprocessing script</title>
 
@@ -249,7 +249,7 @@ div.tocify {
 
 <h1 class="title toc-ignore">Preprocessing script</h1>
 <h4 class="author">Ashish</h4>
-<h4 class="date">2021-08-12</h4>
+<h4 class="date">2021-08-13</h4>
 
 </div>
 
@@ -278,7 +278,6 @@ scale_numerics &lt;- function(df, new_cols=TRUE, ...){
   if(new_cols){df %&gt;% mutate_if(is.numeric, list(sc = ~rsurveyutils::scale(., ...)))}
   else {df %&gt;% mutate_if(is.numeric,  ~scale(., ...))}
 }
-
 #&#39; recent_date_dir
 #&#39;
 #&#39; Get the most subdirectory named with a date from a directory

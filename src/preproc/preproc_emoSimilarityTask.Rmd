@@ -40,7 +40,6 @@ scale_numerics <- function(df, new_cols=TRUE, ...){
   if(new_cols){df %>% mutate_if(is.numeric, list(sc = ~rsurveyutils::scale(., ...)))}
   else {df %>% mutate_if(is.numeric,  ~scale(., ...))}
 }
-
 #' recent_date_dir
 #'
 #' Get the most subdirectory named with a date from a directory
@@ -147,7 +146,6 @@ df_proc <- df_raw %>%
                                                "")) %>% 
   mutate(ac_forceChoice = ifelse(lag(img_file_notChosen) == ac_forceChoice_file, 1, 0)) %>% 
   mutate(ac_forceChoice = ifelse(ac_forceChoice_file == "", NA, ac_forceChoice)) 
-
 ```
 
 TODO: Remove unneeded columns from task dataframe
@@ -169,4 +167,3 @@ df_proc %>%
 ```{r}
 sessionInfo()
 ```
-
