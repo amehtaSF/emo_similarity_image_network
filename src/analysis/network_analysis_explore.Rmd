@@ -20,6 +20,7 @@ In this document, I am conducting exploratory analyses of the recently developed
 rm(list=ls())
 library(lmerTest)
 library(igraph)
+library(kableExtra)
 library(here)
 library(tidyverse)
 theme_set(theme_bw())
@@ -81,19 +82,19 @@ Currently using a .33 minimum threshold of passing attention checks
 ```{r}
 ac_minimum_threshold <- .33
 
-df_ac_fc <- df_task %>% 
+df_ac_forceChoice <- df_task %>% 
   drop_na(ac_forceChoice) %>% 
   group_by(pid, pool) %>% 
   summarize(pr_correct = mean(ac_forceChoice)) %>% 
   ungroup
-df_ac_fc %>% 
+df_ac_forceChoice %>% 
   ggplot(aes(x = pr_correct)) + 
   geom_histogram()
-ac_fail_pids <- df_ac_fc %>% 
+ac_fail_pids <- df_ac_forceChoice %>% 
   filter(pr_correct < ac_minimum_threshold) %>% 
   pull(pid)
 
-# df_ac_fc %>% 
+# df_ac_forceChoice %>% 
 #   filter(pool == "rep" & pr_correct < .33)
   
 ```
@@ -130,6 +131,9 @@ df_trials_wide <- df_trials %>%
 
 # Create graphs community structure and fit clustering
 
+Create clusters using walktrap algorithm
+
+[A Comparative Analysis of Community Detection Algorithms on Artificial Networks](https://www.nature.com/articles/srep30750.pdf)
 ```{r}
 get_graph <- function(df){
    df %>%
@@ -154,12 +158,16 @@ df_graphs <- df_trials_wide %>%
 
 # Sample characteristics
 
-## Number of participants
+## Number of rows per participant
 
 ```{r}
 df_task %>% 
   group_by(pid) %>% 
-  summarise(n = n())
+  summarise(n = n()) %>% 
+  arrange(n) %>% 
+  kbl %>% 
+  kable_styling %>% 
+  scroll_box(height="500px", width = "300px")
 
 df_task %>% pull(pid) %>% unique
 ```
@@ -221,7 +229,7 @@ for(i in 1:nrow(df_graphs)){
     text(0,-1.4, labels=paste(freeResp, collapse = "\n"))
   }
   # get attention check score
-  pr_correct <- df_ac_fc %>%
+  pr_correct <- df_ac_forceChoice %>%
     filter(pid == df_graphs$pid[[i]]) %>%
     pull(pr_correct)
   text(-1.2,1.3, labels=paste("AC correct pr:", round(pr_correct, 2)))
@@ -237,7 +245,13 @@ for(i in 1:nrow(df_graphs)){
 dev.off()
 ```
 
-# Modularity by trial valence
+# Differences by trial valence
+
+Here I'm exploring whether network metrics are different depending on what valence type of block the participant was in
+
+## Modularity metric per trial valence
+
+[Modularity metric](https://en.wikipedia.org/wiki/Modularity_(networks))
 
 ```{r}
 df_graphs %>% 
@@ -253,7 +267,8 @@ df_graphs %>%
   summary
 ```
 
-# Clusters by trial valence
+
+## Mean clusters per trial valence
 
 ```{r}
 df_graphs %>% 
@@ -277,6 +292,8 @@ cor.test(df_graphs$modularity, df_graphs$n_clusters)
 ```
 
 # Relation of modularity to alexithymia
+
+Here and in the valence analysis, the modularity metric is not behaving as expected. I have not continued with modularity analyses beyond the full scale of alexithymia for this reason.
 
 ```{r}
 dat <- df_survey %>% 
@@ -399,6 +416,7 @@ dat %>%
   ggplot(aes(x = erq_reap_fr, y = n_clusters, color = trial_valence)) + 
   geom_point(alpha = .3) + 
   geom_smooth(method="lm")
+
 dat %>% 
   filter(trial_valence == "negative" ) %>% 
   mutate_if(is.numeric, scale) %>% 
@@ -423,6 +441,7 @@ dat %>%
   ggplot(aes(x = erq_supp_fr, y = n_clusters, color = trial_valence)) + 
   geom_point(alpha = .3) + 
   geom_smooth(method="lm")
+
 dat %>% 
   filter(trial_valence == "negative" ) %>% 
   mutate_if(is.numeric, scale) %>% 
@@ -552,9 +571,18 @@ dat %>%
 
 # Explanations of why they chose what they did
 
+TODO
 ```{r}
 
 ```
+
+# More TODOs
+
+* Explore differences in degree related metrics 
+  * mean degree per person 
+  * can I do some kind of clustering of degree distributions to identify classsification schemas? 
+    * [Degree distribution wikipedia](https://en.wikipedia.org/wiki/Degree_distribution)
+    * [clustering pr distributions](https://stats.stackexchange.com/questions/13186/clustering-probability-distributions-methods-metrics) 
 
 # Session Info
 
