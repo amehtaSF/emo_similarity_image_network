@@ -268,8 +268,10 @@ df_graphs <- df_trials_weights %>%
   mutate(cluster = map(graph, cluster_walktrap)) %>% 
   mutate(modularity = map_dbl(cluster, modularity)) %>% 
   mutate(transitivity = map_dbl(graph, transitivity)) %>% 
-  mutate(smallworldness = map_dbl(graph, ~smallworldness(.)["smallworldness"])) %>% # computationally expensive
+  # mutate(smallworldness = map_dbl(graph, ~smallworldness(.)["smallworldness"])) %>% # takes a ridiculous amount of time
   mutate(n_clusters = map_dbl(cluster, ~length(unique(.$membership)))) %>% 
+  mutate(adjacency_matrix = map(graph, ~get.adjacency(., attr="weight", sparse=FALSE))) %>% 
+  mutate(sparsity = map_dbl(adjacency_matrix, ~ mean(. != 0))) %>% 
   ungroup
 ```
 
@@ -334,6 +336,11 @@ df_task %>%
   ggplot(aes(x = mins_elapsed)) + 
   geom_histogram()
 
+```
+
+## Histogram sparsity of adjacency matrix
+```{r}
+df_graphs$sparsity %>% hist
 ```
 
 # Plot all participant networks and clusters and export to PDF
@@ -458,7 +465,15 @@ betweenness(graph_full_neutral)
 
 # Export adjacency matrices of participants
 ```{r}
-get.adjacency(df_graphs_survey$graph[[1]], attr="weighted", sparse=FALSE)
+adjMatrix_dir <- here(paste0("data/proc/adjacencyMatrices/", Sys.Date(), "/"))
+dir.create(adjMatrix_dir, recursive=TRUE)
+for(i in 1:nrow(df_graphs)){
+  adj_mat <- get.adjacency(df_graphs$graph[[i]], attr="weight", sparse=FALSE)
+  # print(dim(adj_mat))
+  write.csv(x=adj_mat, file=paste0(adjMatrix_dir, df_graphs$pid[[i]], "_", 
+                                   df_graphs$trial_valence[[i]], "_adjMatrix.csv"))
+}
+
 ```
 
 
