@@ -223,12 +223,14 @@ get_graph <- function(df){
   # Takes a dataframe with a single participant and single trial valence
   dat <- df %>%
     group_by(img_file_1, img_file_2) %>%
-    summarize(pr_chosen = mean(chosen)) %>%
-    ungroup
+    summarize(pr_chosen = mean(chosen), .groups = "drop_last") %>%
+    ungroup %>% 
+    filter(pr_chosen > 0)
   g <- dat %>%
     select(img_file_1, img_file_2) %>%
     graph_from_data_frame(directed=FALSE)
   E(g)$weight <- dat$pr_chosen
+  # g <- delete.edges(g, which(E(g)$weight == 0))
   return(g)
 }
 
@@ -270,8 +272,10 @@ df_graphs <- df_trials_weights %>%
   mutate(transitivity = map_dbl(graph, transitivity)) %>% 
   # mutate(smallworldness = map_dbl(graph, ~smallworldness(.)["smallworldness"])) %>% # takes a ridiculous amount of time
   mutate(n_clusters = map_dbl(cluster, ~length(unique(.$membership)))) %>% 
-  mutate(adjacency_matrix = map(graph, ~get.adjacency(., attr="weight", sparse=FALSE))) %>% 
-  mutate(sparsity = map_dbl(adjacency_matrix, ~ mean(. != 0))) %>% 
+  mutate(adjacency_mat = map(graph, ~get.adjacency(., attr="weight", sparse=FALSE))) %>% 
+  mutate(adjacency_mat_sparse = map(graph, ~get.adjacency(., attr="weight", sparse=TRUE))) %>% 
+  mutate(sparsity = map_dbl(adjacency_mat, ~ mean(. != 0))) %>% 
+  
   ungroup
 ```
 
@@ -374,13 +378,15 @@ for(i in 1:nrow(df_graphs)){
   if(length(freeResp) > 0){
     text(0,-1.4, labels=paste(freeResp, collapse = "\n"))
   }
-  # get pid
+  # print pid
   text(-1.2,1.4, labels=paste("PID: ", df_graphs$pid[[i]]))
   # get attention check score
   pr_correct <- df_ac_forceChoice %>%
     dplyr::filter(pid == df_graphs$pid[[i]]) %>%
     pull(pr_correct)
-  text(-1.2,1.3, labels=paste("AC correct pr:", round(pr_correct, 2)))
+  text(-1.2,1.3, labels=paste("Att check correct pr:", round(pr_correct, 2)))
+  # print sparsity
+  text(-1.2,1.2, labels=paste("Adj matrix sparsity: ", df_graphs$sparsity[[i]]))
   # get PAQ score
   paq_score <- df_survey %>%
     dplyr::mutate(paq = rsurveyutils::scale(paq)) %>%
@@ -393,7 +399,9 @@ for(i in 1:nrow(df_graphs)){
 dev.off()
 ```
 
-# Plot between participant networks
+# Between person network
+
+## Plot between participant networks
 ```{r}
 df_graph_full_neg <- df_trials_weights %>% 
   filter(trial_valence == "negative") %>% 
@@ -423,9 +431,9 @@ graph_full_neg %>%
 centralityPlot(graph_full_neg, scale="raw", include = c("Degree", "Betweenness", "Closeness"))
 hist(E(graph_full_neg)$weight)
 betweenness(graph_full_neg)
-tibble(
-  betweenness = betweenness(graph_)
-)
+# tibble(
+#   betweenness = betweenness(graph_)
+# )
 ```
 
 * Why do I need to filter weight > 0 to show betweenness
@@ -523,7 +531,9 @@ df_graphs %>%
 cor.test(df_graphs$modularity, df_graphs$n_clusters)
 ```
 
-# Relation of modularity to alexithymia
+# Modularity
+
+## Alexithymia
 
 Here and in the valence analysis, the modularity metric is not behaving as expected. I have not continued with modularity analyses beyond the full scale of alexithymia for this reason.
 
@@ -536,13 +546,40 @@ df_graphs_survey %>%
   ggplot(aes(x = paq, y = modularity, color = trial_valence)) + 
   geom_point(alpha = .3) + 
   geom_smooth(method="lm")
+df_graphs_survey %>% 
+  ggplot(aes(x = paq, y = modularity, color = trial_valence)) + 
+  geom_point(alpha = .3) + 
+  geom_smooth()
 
-# df_graphs_survey %>% 
-#   lmer(modularity ~ paq + (1|pid), .) %>% 
-#   summary
+df_graphs_survey %>%
+  mutate_at(vars(modularity, paq), scale) %>% 
+  lmer(modularity ~ paq + (1|pid), .) %>%
+  summary
 ```
 
-# Relation of n clusters to variables
+## Reappraisal
+```{r}
+df_graphs_survey %>% 
+  ggplot(aes(x = erq_reap_fr, y = modularity, color = trial_valence)) + 
+  geom_point(alpha = .3) + 
+  geom_smooth(method="lm")
+
+df_graphs_survey %>% 
+  filter(trial_valence == "negative" ) %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(modularity ~ erq_reap_fr, . ) %>% 
+  summary
+
+df_graphs_survey %>% 
+  filter(trial_valence == "negative" | trial_valence == "neutral") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(modularity ~ erq_reap_fr*trial_valence, . ) %>% 
+  summary
+
+```
+
+
+# Number of clusters
 ```{r}
 df_graphs_survey %>% 
   ggplot(aes(n_clusters)) +
@@ -553,11 +590,18 @@ df_graphs_survey %>%
 ## Alexithymia
 
 ```{r}
-## Full scale
+# -- Full scale -- #
 df_graphs_survey %>% 
   ggplot(aes(x = paq, y = n_clusters, color = trial_valence)) + 
   geom_point(alpha = .3) + 
   geom_smooth(method="lm")
+
+# Non-linear plot
+df_graphs_survey %>% 
+  ggplot(aes(x = paq, y = n_clusters, color = trial_valence)) + 
+  geom_point(alpha = .3) + 
+  geom_smooth()
+
 df_graphs_survey %>% 
   filter(trial_valence == "negative") %>% 
   mutate_if(is.numeric, scale) %>% 
@@ -574,26 +618,26 @@ df_graphs_survey %>%
   lm(n_clusters ~ paq, .) %>% 
   summary
 
-## DIF
+# -- DIF -- #
 
 df_graphs_survey %>% 
   ggplot(aes(x = paq_dif, y = n_clusters, color = trial_valence)) + 
   geom_point(alpha = .3) + 
   geom_smooth(method="lm")
 
-# DDF
+# -- DDF -- #
 df_graphs_survey %>% 
   ggplot(aes(x = paq_ddf, y = n_clusters, color = trial_valence)) + 
   geom_point(alpha = .3) + 
   geom_smooth(method="lm")
 
-## EOT
+# -- EOT -- #
 df_graphs_survey %>% 
   ggplot(aes(x = paq_eot, y = n_clusters, color = trial_valence)) + 
   geom_point(alpha = .3) + 
   geom_smooth(method="lm")
 
-## PAQ Pos
+# -- PAQ pos -- #
 df_graphs_survey %>% 
   ggplot(aes(x = paq_pos, y = n_clusters, color = trial_valence)) + 
   geom_point(alpha = .3) + 
@@ -615,7 +659,7 @@ df_graphs_survey %>%
   summary
   
 
-## PAQ Neg 
+# -- PAQ neg -- #
 df_graphs_survey %>% 
   ggplot(aes(x = paq_neg, y = n_clusters, color = trial_valence)) + 
   geom_point(alpha = .3) + 
