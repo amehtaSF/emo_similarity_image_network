@@ -11,7 +11,7 @@
 
 <meta name="author" content="Ashish" />
 
-<meta name="date" content="2021-08-13" />
+<meta name="date" content="2021-09-22" />
 
 <title>Preprocessing script</title>
 
@@ -249,7 +249,7 @@ div.tocify {
 
 <h1 class="title toc-ignore">Preprocessing script</h1>
 <h4 class="author">Ashish</h4>
-<h4 class="date">2021-08-13</h4>
+<h4 class="date">2021-09-22</h4>
 
 </div>
 
@@ -302,18 +302,18 @@ recent_date_dir &lt;- function(directory, recursive=FALSE){
 <div id="read-task-data" class="section level2" number="2.1">
 <h2 number="2.1"><span class="header-section-number">2.1</span> Read task data</h2>
 <pre class="r"><code>filepath &lt;- paste0(recent_date_dir(here(&quot;data/raw/emotion_similarity_task&quot;)), 
-                   &quot;/emotion-similarity-task.csv&quot;)
+                   &quot;/emo-similarity-task-sum2021.csv&quot;)
 print(paste(&quot;Datafile:&quot;, filepath))</code></pre>
-<pre><code>## [1] &quot;Datafile: /Users/ashish/files/research/projects/alexithymia/emo_similarity_image_network/data/raw/emotion_similarity_task/2021-07-26/emotion-similarity-task.csv&quot;</code></pre>
+<pre><code>## [1] &quot;Datafile: /Users/ashish/files/research/projects/alexithymia/emo_similarity_image_network/data/raw/emotion_similarity_task/2021-09-22/emo-similarity-task-sum2021.csv&quot;</code></pre>
 <pre class="r"><code>df_raw &lt;- read_csv(filepath)</code></pre>
-<pre><code>## Warning: 30391 parsing failures.
-## row col   expected     actual                                                                                                                                                     file
-##   1  -- 30 columns 25 columns &#39;/Users/ashish/files/research/projects/alexithymia/emo_similarity_image_network/data/raw/emotion_similarity_task/2021-07-26/emotion-similarity-task.csv&#39;
-##   2  -- 30 columns 25 columns &#39;/Users/ashish/files/research/projects/alexithymia/emo_similarity_image_network/data/raw/emotion_similarity_task/2021-07-26/emotion-similarity-task.csv&#39;
-##   3  -- 30 columns 25 columns &#39;/Users/ashish/files/research/projects/alexithymia/emo_similarity_image_network/data/raw/emotion_similarity_task/2021-07-26/emotion-similarity-task.csv&#39;
-##   4  -- 30 columns 25 columns &#39;/Users/ashish/files/research/projects/alexithymia/emo_similarity_image_network/data/raw/emotion_similarity_task/2021-07-26/emotion-similarity-task.csv&#39;
-##   5  -- 30 columns 25 columns &#39;/Users/ashish/files/research/projects/alexithymia/emo_similarity_image_network/data/raw/emotion_similarity_task/2021-07-26/emotion-similarity-task.csv&#39;
-## ... ... .......... .......... ........................................................................................................................................................
+<pre><code>## Warning: 32762 parsing failures.
+## row col   expected     actual                                                                                                                                                         file
+##   1  -- 31 columns 25 columns &#39;/Users/ashish/files/research/projects/alexithymia/emo_similarity_image_network/data/raw/emotion_similarity_task/2021-09-22/emo-similarity-task-sum2021.csv&#39;
+##   2  -- 31 columns 25 columns &#39;/Users/ashish/files/research/projects/alexithymia/emo_similarity_image_network/data/raw/emotion_similarity_task/2021-09-22/emo-similarity-task-sum2021.csv&#39;
+##   3  -- 31 columns 25 columns &#39;/Users/ashish/files/research/projects/alexithymia/emo_similarity_image_network/data/raw/emotion_similarity_task/2021-09-22/emo-similarity-task-sum2021.csv&#39;
+##   4  -- 31 columns 25 columns &#39;/Users/ashish/files/research/projects/alexithymia/emo_similarity_image_network/data/raw/emotion_similarity_task/2021-09-22/emo-similarity-task-sum2021.csv&#39;
+##   5  -- 31 columns 25 columns &#39;/Users/ashish/files/research/projects/alexithymia/emo_similarity_image_network/data/raw/emotion_similarity_task/2021-09-22/emo-similarity-task-sum2021.csv&#39;
+## ... ... .......... .......... ............................................................................................................................................................
 ## See problems(...) for more details.</code></pre>
 </div>
 <div id="create-first-stage-processed-dataframe-for-task" class="section level2" number="2.2">
@@ -391,10 +391,10 @@ print(paste(&quot;Datafile:&quot;, filepath))</code></pre>
                                                &quot;&quot;)) %&gt;% 
   mutate(ac_forceChoice = ifelse(lag(img_file_notChosen) == ac_forceChoice_file, 1, 0)) %&gt;% 
   mutate(ac_forceChoice = ifelse(ac_forceChoice_file == &quot;&quot;, NA, ac_forceChoice)) </code></pre>
-<pre><code>## Warning: Expected 3 pieces. Missing pieces filled with `NA` in 5096 rows [1,
+<pre><code>## Warning: Expected 3 pieces. Missing pieces filled with `NA` in 6667 rows [1,
 ## 2, 6, 18, 30, 34, 40, 43, 62, 88, 93, 103, 110, 117, 122, 130, 132, 146, 153,
 ## 158, ...].</code></pre>
-<pre><code>## Warning: Expected 2 pieces. Missing pieces filled with `NA` in 5308 rows [1,
+<pre><code>## Warning: Expected 2 pieces. Missing pieces filled with `NA` in 6891 rows [1,
 ## 2, 6, 18, 30, 34, 40, 43, 62, 88, 93, 103, 110, 117, 122, 130, 132, 146, 153,
 ## 158, ...].</code></pre>
 <p>TODO: Remove unneeded columns from task dataframe</p>

@@ -7,7 +7,7 @@
 
         <meta name="author" content="Ashish" />
     
-        <meta name="date" content="2021-08-12" />
+        <meta name="date" content="2021-09-22" />
     
     <title>Preprocessing presurveys</title>
 
@@ -207,7 +207,7 @@
     </div>
     <div id="postamble" data-toggle="wy-nav-shift" class="status">
                   <p class="author"><span class="glyphicon glyphicon-user"></span> Ashish</p>
-                        <p class="date"><span class="glyphicon glyphicon-calendar"></span> 2021-08-12</p>
+                        <p class="date"><span class="glyphicon glyphicon-calendar"></span> 2021-09-22</p>
           </div>
    </div>
      
@@ -248,7 +248,7 @@
 <span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a>                                <span class="st">&quot;/emo_similarity_network_presurvey_sum2021_value_codebook.csv&quot;</span>)</span>
 <span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a>codebook_vars <span class="ot">&lt;-</span> <span class="fu">read_csv</span>(<span class="fu">here</span>(codebook_vars_filepath))</span></code></pre></div>
 <pre><code>## 
-## ── Column specification ────────────────────────────────────────────────────────────────────────────────────────────────────
+## ── Column specification ───────────────────────────────────────────────────────────────────────────
 ## cols(
 ##   question_id = col_character(),
 ##   qualtrics_var_name = col_character(),
@@ -260,7 +260,7 @@
 ## )</code></pre>
 <div class="sourceCode" id="cb5"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a>codebook_values <span class="ot">&lt;-</span> <span class="fu">read_csv</span>(<span class="fu">here</span>(codebook_values_filepath))</span></code></pre></div>
 <pre><code>## 
-## ── Column specification ────────────────────────────────────────────────────────────────────────────────────────────────────
+## ── Column specification ───────────────────────────────────────────────────────────────────────────
 ## cols(
 ##   qualtrics_var_name = col_character(),
 ##   src_value = col_character(),
@@ -269,7 +269,7 @@
 <div class="sourceCode" id="cb7"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a>filepath <span class="ot">&lt;-</span> <span class="fu">paste0</span>(data_dir, <span class="st">&quot;/emo_similarity_network_presurvey_sum2021.csv&quot;</span>)</span>
 <span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a>df_file <span class="ot">&lt;-</span> <span class="fu">read_csv</span>(<span class="fu">here</span>(filepath))</span></code></pre></div>
 <pre><code>## 
-## ── Column specification ────────────────────────────────────────────────────────────────────────────────────────────────────
+## ── Column specification ───────────────────────────────────────────────────────────────────────────
 ## cols(
 ##   .default = col_character()
 ## )
@@ -282,13 +282,13 @@
 <span id="cb9-6"><a href="#cb9-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">rawdatafile =</span> filepath) <span class="sc">%&gt;%</span> </span>
 <span id="cb9-7"><a href="#cb9-7" aria-hidden="true" tabindex="-1"></a>  <span class="co"># -- rename columns -- #</span></span>
 <span id="cb9-8"><a href="#cb9-8" aria-hidden="true" tabindex="-1"></a>  <span class="fu">codebook_renamer</span>(codebook_vars<span class="sc">$</span>qualtrics_var_name, codebook_vars<span class="sc">$</span>new_var_name)</span></code></pre></div>
-<pre><code>## slice: removed 2 rows (1%), 148 rows remaining</code></pre>
-<pre><code>## select_if: dropped 9 variables (RecipientLastName, RecipientFirstName, RecipientEmail, ExternalReference, race_6, …)</code></pre>
+<pre><code>## slice: removed 2 rows (1%), 193 rows remaining</code></pre>
+<pre><code>## select_if: dropped 4 variables (RecipientLastName, RecipientFirstName, RecipientEmail, ExternalReference)</code></pre>
 <pre><code>## mutate: new variable &#39;rawdatafile&#39; (character) with one unique value and 0% NA</code></pre>
-<pre><code>## Warning in codebook_renamer(., codebook_vars$qualtrics_var_name, codebook_vars$new_var_name): Warning: 22 item(s) found in names_from not found in df columns. 
-##  panas_1 panas_10 panas_11 panas_12 panas_13 panas_14 panas_15 panas_16 panas_17 panas_18 panas_19 panas_2 panas_20 panas_3 panas_4 panas_5 panas_6 panas_7 panas_8 panas_9 phq_9 race</code></pre>
-<pre><code>## Warning in codebook_renamer(., codebook_vars$qualtrics_var_name, codebook_vars$new_var_name): Warning: 94 columns(s) found in df not found in names_from. 
-##  StartDate EndDate Status IPAddress Progress Duration (in seconds) Finished RecordedDate ResponseId LocationLatitude LocationLongitude DistributionChannel UserLanguage paq_timer_1_First Click paq_timer_1_Last Click paq_timer_1_Page Submit paq_timer_1_Click Count paq_timer_2_First Click paq_timer_2_Last Click paq_timer_2_Page Submit paq_timer_2_Click Count paq_timer_3_First Click paq_timer_3_Last Click paq_timer_3_Page Submit paq_timer_3_Click Count paq_timer_4_First Click paq_timer_4_Last Click paq_timer_4_Page Submit paq_timer_4_Click Count pmerq_timer_First Click pmerq_timer_Last Click pmerq_timer_Page Submit pmerq_timer_Click Count swls_timer_First Click swls_timer_Last Click swls_timer_Page Submit swls_timer_Click Count fss_timer_First Click fss_timer_Last Click fss_timer_Page Submit fss_timer_Click Count gad_timer_First Click gad_timer_Last Click gad_timer_Page Submit gad_timer_Click Count phq_timer_First Click phq_timer_Last Click phq_timer_Page Submit phq_timer_Click Count tas_timer_1_First Click tas_timer_1_Last Click tas_timer_1_Page Submit tas_timer_1_Click Count tas_timer_2_First Click tas_timer_2_Last Click tas_timer_2_Page Submit tas_timer_2_Click Count tas_timer_3_First Click tas_timer_3_Last Click tas_timer_3_Page Submit tas_timer_3_Click Count tas_timer_4_First Click tas_timer_4_Last Click tas_timer_4_Page Submit tas_timer_4_Click Count gender_3_TEXT age academic_7_TEXT race_1 race_2 race_16 race_3 race_4 race_5 race_7 race_8 race_10 race_11 race_13 race_15 race_1_TEXT race_2_TEXT race_16_TEXT race_3_TEXT race_13_TEXT race_15_TEXT pid pool qualtrics_name ac_pmerq_pass ac_tas_pass ac_paq_pass ac_passes rawdatafile</code></pre>
+<pre><code>## Warning in codebook_renamer(., codebook_vars$qualtrics_var_name, codebook_vars$new_var_name): Warning: 21 item(s) found in names_from not found in df columns. 
+##  panas_1 panas_10 panas_11 panas_12 panas_13 panas_14 panas_15 panas_16 panas_17 panas_18 panas_19 panas_2 panas_20 panas_3 panas_4 panas_5 panas_6 panas_7 panas_8 panas_9 phq_9</code></pre>
+<pre><code>## Warning in codebook_renamer(., codebook_vars$qualtrics_var_name, codebook_vars$new_var_name): Warning: 83 columns(s) found in df not found in names_from. 
+##  StartDate EndDate Status IPAddress Progress Duration (in seconds) Finished RecordedDate ResponseId LocationLatitude LocationLongitude DistributionChannel UserLanguage paq_timer_1_First Click paq_timer_1_Last Click paq_timer_1_Page Submit paq_timer_1_Click Count paq_timer_2_First Click paq_timer_2_Last Click paq_timer_2_Page Submit paq_timer_2_Click Count paq_timer_3_First Click paq_timer_3_Last Click paq_timer_3_Page Submit paq_timer_3_Click Count paq_timer_4_First Click paq_timer_4_Last Click paq_timer_4_Page Submit paq_timer_4_Click Count pmerq_timer_First Click pmerq_timer_Last Click pmerq_timer_Page Submit pmerq_timer_Click Count swls_timer_First Click swls_timer_Last Click swls_timer_Page Submit swls_timer_Click Count fss_timer_First Click fss_timer_Last Click fss_timer_Page Submit fss_timer_Click Count gad_timer_First Click gad_timer_Last Click gad_timer_Page Submit gad_timer_Click Count phq_timer_First Click phq_timer_Last Click phq_timer_Page Submit phq_timer_Click Count tas_timer_1_First Click tas_timer_1_Last Click tas_timer_1_Page Submit tas_timer_1_Click Count tas_timer_2_First Click tas_timer_2_Last Click tas_timer_2_Page Submit tas_timer_2_Click Count tas_timer_3_First Click tas_timer_3_Last Click tas_timer_3_Page Submit tas_timer_3_Click Count tas_timer_4_First Click tas_timer_4_Last Click tas_timer_4_Page Submit tas_timer_4_Click Count gender_3_TEXT age academic_7_TEXT race_1_TEXT race_2_TEXT race_16_TEXT race_3_TEXT race_13_TEXT race_14_TEXT race_15_TEXT pid pool qualtrics_name ac_pmerq_pass ac_tas_pass ac_paq_pass ac_passes rawdatafile</code></pre>
 </div>
 <div id="process-data" class="section level2">
 <h2>Process data</h2>
@@ -302,6 +302,10 @@
 <pre><code>## Warning in codebook_recoder(., var_regex = codebook_values$qualtrics_var_name, :
 ## Removing incomplete items</code></pre>
 <pre><code>## Warning in value[[3L]](cond): Unable to apply FUN to column
+
+## Warning in value[[3L]](cond): Unable to apply FUN to column
+
+## Warning in value[[3L]](cond): Unable to apply FUN to column
 
 ## Warning in value[[3L]](cond): Unable to apply FUN to column
 

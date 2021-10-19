@@ -63,12 +63,16 @@ recent_date_dir <- function(directory, recursive=FALSE){
 
 ## Read task data
 ```{r, message=FALSE}
-filepath <- paste0(recent_date_dir(here("data/raw/emotion_similarity_task")), 
-                   "/emotion-similarity-task.csv")
+filepath <- paste0(
+  recent_date_dir(here("data/raw/emotion_similarity_task")),
+  # "data/raw/emotion_similarity_task/",
+  # "2021-07-09/",
+  # "2021-07-26",
+  "/emo-similarity-task-sum2021.csv")
+  # "/emotion-similarity-task.csv")
 print(paste("Datafile:", filepath))
 df_raw <- read_csv(filepath)
 ```
-
 
 ## Create first stage processed dataframe for task
 

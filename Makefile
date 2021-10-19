@@ -19,7 +19,8 @@ data/proc/emoSimilarityTask_proc.csv
 
 # -- Preprocess data -- #
 
-preproc: data/proc/emo_similarity_network_presurvey_sum2021_proc.csv
+preproc: data/proc/emo_similarity_network_presurvey_sum2021_proc.csv \
+data/proc/emoSimilarityTask_proc.csv
 
 data/proc/emo_similarity_network_presurvey_sum2021_proc.csv: src/preproc/preproc_surveys.Rmd \
 data/raw/emo_similarity_network_presurvey_sum2021/emo_similarity_network_presurvey_sum2021_value_codebook.csv \
