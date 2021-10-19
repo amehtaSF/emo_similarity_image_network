@@ -197,6 +197,8 @@ Create clusters using walktrap algorithm
 Two ways of making graphs: 
   * Only consider when images were chosen together
   * Factor in when images were chosen together and when they were not chosen together
+  
+igraph will include an edge even if the weight between the two nodes is 0. If I include the delete.edges line, I delete those edges where the images were never selected as similar. If I include the filter(pr_chosen > 0) line then it keeps edges between some of the nodes. Why are these two things different??? (see commented out code for an example)
 ```{r}
 # get_graph <- function(df=df_trials_wide){
 #    df %>%
@@ -224,8 +226,8 @@ get_graph <- function(df){
   dat <- df %>%
     group_by(img_file_1, img_file_2) %>%
     summarize(pr_chosen = mean(chosen), .groups = "drop_last") %>%
-    ungroup %>% 
-    filter(pr_chosen > 0)
+    filter(pr_chosen > 0) %>%
+    ungroup
   g <- dat %>%
     select(img_file_1, img_file_2) %>%
     graph_from_data_frame(directed=FALSE)
@@ -235,33 +237,33 @@ get_graph <- function(df){
 }
 
 
-# dat <- df_trials_weights %>% 
-#   filter(pid == 6591) %>% 
-#   group_by(pid, trial_valence, img_file_1, img_file_2) %>% 
-#   filter(trial_valence=="negative") %>% 
-#   summarize(pr_chosen = mean(chosen)) %>% 
+# dat <- df_trials_weights %>%
+#   filter(pid == 96526) %>%
+#   group_by(pid, trial_valence, img_file_1, img_file_2) %>%
+#   filter(trial_valence=="neutral") %>%
+#   summarize(pr_chosen = mean(chosen)) %>%
+#   tidylog::filter(pr_chosen != 0) %>%
 #   ungroup
-# g <- dat %>% 
-# 
-#   select(img_file_1, img_file_2) %>% 
+# g <- dat %>%
+#   select(img_file_1, img_file_2) %>%
 #   graph_from_data_frame(directed=FALSE)
-# E(g)$weight <- dat$pr_chosen  
-#   
-# 
+# E(g)
+# E(g)$weight <- dat$pr_chosen
+# g <- delete.edges(g, which(E(g)$weight == 0))
+# E(g)
+# E(g)$weight
 # plot(
 #   cluster_walktrap(g),
-#   g, 
-#   # vertex.size = 10, 
-#   vertex.size = strength(g), 
-#   vertex.frame.color = NA, 
-#   vertex.label.cex = .7,  
+#   g,
+#   vertex.size = strength(g),
+#   vertex.frame.color = NA,
+#   vertex.label.cex = .7,
 #   vertex.label.color = "black",
-#   # vertex.label = NA,
-#   edge.curved = .2, 
+#   edge.curved = .2,
 #   edge.width = E(g)$weight,
 #   layout = layout.fruchterman.reingold(g)
 # )
-#   
+
   
 df_graphs <- df_trials_weights %>% 
   group_by(pid, trial_valence) %>% 
@@ -274,9 +276,11 @@ df_graphs <- df_trials_weights %>%
   mutate(n_clusters = map_dbl(cluster, ~length(unique(.$membership)))) %>% 
   mutate(adjacency_mat = map(graph, ~get.adjacency(., attr="weight", sparse=FALSE))) %>% 
   mutate(adjacency_mat_sparse = map(graph, ~get.adjacency(., attr="weight", sparse=TRUE))) %>% 
-  mutate(sparsity = map_dbl(adjacency_mat, ~ mean(. != 0))) %>% 
+  mutate(sparsity = map_dbl(adjacency_mat, ~ mean(. == 0))) %>% 
   
   ungroup
+
+
 ```
 
 # Combine graphs and survey
@@ -386,13 +390,15 @@ for(i in 1:nrow(df_graphs)){
     pull(pr_correct)
   text(-1.2,1.3, labels=paste("Att check correct pr:", round(pr_correct, 2)))
   # print sparsity
-  text(-1.2,1.2, labels=paste("Adj matrix sparsity: ", df_graphs$sparsity[[i]]))
+  text(-1.2,1.2, labels=paste("Adj matrix sparsity: ", round(df_graphs$sparsity[[i]], 2)))
+  # print modularity
+  text(-1.2,1.1, labels=paste("Modularity: ", round(df_graphs$modularity[[i]], 2)))
   # get PAQ score
   paq_score <- df_survey %>%
     dplyr::mutate(paq = rsurveyutils::scale(paq)) %>%
     dplyr::filter(pid == df_graphs$pid[[i]]) %>%
     pull(paq)
-    text(-1.2,seq(1.1, by = -.1, length.out = length(paq_score)),
+    text(-1.2,seq(1.0, by = -.1, length.out = length(paq_score)),
          labels=paste("PAQ:", round(paq_score, 2)))
 
 }
@@ -402,6 +408,11 @@ dev.off()
 # Between person network
 
 ## Plot between participant networks
+
+### Negative valence
+
+* Why is strength not showing in centralityPlot function?
+* Why is eigencentrality and closeness inversely correlated
 ```{r}
 df_graph_full_neg <- df_trials_weights %>% 
   filter(trial_valence == "negative") %>% 
@@ -413,7 +424,6 @@ graph_full_neg <- df_graph_full_neg %>%
   select(img_file_1, img_file_2) %>% 
   graph_from_data_frame(directed=FALSE)
 E(graph_full_neg)$weight <- df_graph_full_neg$weight
-# graph_full_neg$weight <- df_graph_full_neg$weight
 graph_full_neg %>% 
    plot(
     cluster_walktrap(.),
@@ -428,13 +438,28 @@ graph_full_neg %>%
     layout = layout.fruchterman.reingold(.)
     # layout = layout.kamada.kawai(.)
    )
-centralityPlot(graph_full_neg, scale="raw", include = c("Degree", "Betweenness", "Closeness"))
+# centralityPlot(graph_full_neg, scale="raw", include = c("Strength", "Betweenness", "Closeness"))
 hist(E(graph_full_neg)$weight)
-betweenness(graph_full_neg)
-# tibble(
-#   betweenness = betweenness(graph_)
-# )
+
+# Plot centrality measures
+tibble(
+  node = names(betweenness(graph_full_neg)),
+  betweenness = betweenness(graph_full_neg),
+  eigencentrality = eigen_centrality(graph_full_neg)$vector[node],
+  strength = strength(graph_full_neg)[node],
+  closeness = closeness(graph_full_neg)[node]
+) %>% 
+  pivot_longer(-node, names_to = "measure") %>% 
+  ggplot(aes(x = node, y = value)) + 
+  geom_point() + 
+  geom_line(aes(group = measure)) + 
+  facet_grid(~measure, scale ="free_x") + 
+  coord_flip()
 ```
+
+### Neutral valence
+### Positive valence
+
 
 * Why do I need to filter weight > 0 to show betweenness
 * Why can't I see strength in centralityplot
