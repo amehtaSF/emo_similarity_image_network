@@ -14,14 +14,12 @@ output:
 
 In this document, I am conducting exploratory analyses of the recently developed emotion similarity network task. In the task, participants select which two of a set of three emotional images are most similar in their emotional quality. I hypothesize that participants who exhibit self-report characteristics of greater emotional awareness will have more distinct communities in a within person network analysis of each participants' similarity structure.
 
+-   [clustering coefficient](https://en.wikipedia.org/wiki/Clustering_coefficient)
+-   [small world networks](https://en.wikipedia.org/wiki/Small-world_network)
+-   [mean shortest path length](https://en.wikipedia.org/wiki/Distance_(graph_theory)) - determines if network is small world
 
+-   How does one characterize an empirical degree distribution? Is there anything meaningful there for me?
 
-
-* [clustering coefficient](https://en.wikipedia.org/wiki/Clustering_coefficient)
-* [small world networks](https://en.wikipedia.org/wiki/Small-world_network)
-* [mean shortest path length](https://en.wikipedia.org/wiki/Distance_(graph_theory)) - determines if network is small world
-    
-    
 # Initialization
 
 ```{r, message=FALSE}
@@ -61,9 +59,9 @@ scale_numerics <- function(df, new_cols=TRUE, ...){
 
 ```
 
-
 ## Read & process survey data
-```{r, message=FALSE}
+
+```{r message=FALSE}
 survey_filepath <- "data/proc/emo_similarity_network_presurvey_sum2021_proc.csv"
 
 df_survey_raw <- read_csv(here(survey_filepath))
@@ -80,6 +78,7 @@ df_survey <- df_survey_raw %>%
 ```
 
 ## Read & process task data
+
 ```{r, message=FALSE}
 task_filepath <- "data/proc/emoSimilarityTask_proc.csv"
 
@@ -190,15 +189,22 @@ df_trials_weights <- df_trials_chosen %>%
 
 # Create graphs community structure and fit clustering
 
-Create clusters using walktrap algorithm
-
 [A Comparative Analysis of Community Detection Algorithms on Artificial Networks](https://www.nature.com/articles/srep30750.pdf)
 
-Two ways of making graphs: 
-  * Only consider when images were chosen together
-  * Factor in when images were chosen together and when they were not chosen together
-  
-igraph will include an edge even if the weight between the two nodes is 0. If I include the delete.edges line, I delete those edges where the images were never selected as similar. If I include the filter(pr_chosen > 0) line then it keeps edges between some of the nodes. Why are these two things different??? (see commented out code for an example)
+Two ways of making graphs:
+
+-   Only consider when images were chosen together
+
+-   Factor in when images were chosen together and when they were not chosen together
+
+Transitivity
+
+-   Weighted transitivity metric: Barrat et al., 2004
+
+Notes:
+
+-   igraph will include an edge even if the weight between the two nodes is 0. If I include the delete.edges line, I delete those edges where the images were never selected as similar. If I include the filter(pr_chosen \> 0) line then it keeps edges between some of the nodes. Why are these two things different??? (see commented out code for an example)
+
 ```{r}
 # get_graph <- function(df=df_trials_wide){
 #    df %>%
@@ -272,6 +278,7 @@ df_graphs <- df_trials_weights %>%
   mutate(cluster = map(graph, cluster_walktrap)) %>% 
   mutate(modularity = map_dbl(cluster, modularity)) %>% 
   mutate(transitivity = map_dbl(graph, transitivity)) %>% 
+  mutate(transitivity_weighted = map_dbl(graph, ~mean(transitivity(., "weighted")))) %>% 
   # mutate(smallworldness = map_dbl(graph, ~smallworldness(.)["smallworldness"])) %>% # takes a ridiculous amount of time
   mutate(n_clusters = map_dbl(cluster, ~length(unique(.$membership)))) %>% 
   mutate(adjacency_mat = map(graph, ~get.adjacency(., attr="weight", sparse=FALSE))) %>% 
@@ -284,11 +291,11 @@ df_graphs <- df_trials_weights %>%
 ```
 
 # Combine graphs and survey
+
 ```{r}
 df_graphs_survey <- df_graphs %>% 
   inner_join(df_survey) 
 ```
-
 
 ```{r, echo=FALSE}
 # ------ End Preprocessing ------ #
@@ -347,6 +354,7 @@ df_task %>%
 ```
 
 ## Histogram sparsity of adjacency matrix
+
 ```{r}
 df_graphs$sparsity %>% hist
 ```
@@ -411,8 +419,9 @@ dev.off()
 
 ### Negative valence
 
-* Why is strength not showing in centralityPlot function?
-* Why is eigencentrality and closeness inversely correlated
+-   Why is strength not showing in centralityPlot function?
+-   Why is eigencentrality and closeness inversely correlated
+
 ```{r}
 df_graph_full_neg <- df_trials_weights %>% 
   filter(trial_valence == "negative") %>% 
@@ -447,7 +456,8 @@ tibble(
   betweenness = betweenness(graph_full_neg),
   eigencentrality = eigen_centrality(graph_full_neg)$vector[node],
   strength = strength(graph_full_neg)[node],
-  closeness = closeness(graph_full_neg)[node]
+  closeness = closeness(graph_full_neg)[node],
+  weightedTransitivity = transitivity(graph_full_neg, "weighted")
 ) %>% 
   pivot_longer(-node, names_to = "measure") %>% 
   ggplot(aes(x = node, y = value)) + 
@@ -458,12 +468,13 @@ tibble(
 ```
 
 ### Neutral valence
+
 ### Positive valence
 
+-   Why do I need to filter weight \> 0 to show betweenness
+-   Why can't I see strength in `centralityPlot()` ?
+-   Why are centrality metrics all the same
 
-* Why do I need to filter weight > 0 to show betweenness
-* Why can't I see strength in centralityplot
-* Why are centrality metrics all the same
 ```{r}
 df_graph_full_neutral <- df_trials_weights %>% 
   filter(trial_valence == "neutral") %>% 
@@ -497,6 +508,7 @@ betweenness(graph_full_neutral)
 ```
 
 # Export adjacency matrices of participants
+
 ```{r}
 adjMatrix_dir <- here(paste0("data/proc/adjacencyMatrices/", Sys.Date(), "/"))
 dir.create(adjMatrix_dir, recursive=TRUE)
@@ -508,7 +520,6 @@ for(i in 1:nrow(df_graphs)){
 }
 
 ```
-
 
 # Differences by trial valence
 
@@ -531,7 +542,6 @@ df_graphs %>%
   lmer(modularity ~ trial_valence + (1|pid), .) %>% 
   summary
 ```
-
 
 ## Mean clusters per trial valence
 
@@ -560,8 +570,6 @@ cor.test(df_graphs$modularity, df_graphs$n_clusters)
 
 ## Alexithymia
 
-Here and in the valence analysis, the modularity metric is not behaving as expected. I have not continued with modularity analyses beyond the full scale of alexithymia for this reason.
-
 ```{r}
 dat <- df_survey %>% 
   select(pid, paq) %>% 
@@ -583,6 +591,7 @@ df_graphs_survey %>%
 ```
 
 ## Reappraisal
+
 ```{r}
 df_graphs_survey %>% 
   ggplot(aes(x = erq_reap_fr, y = modularity, color = trial_valence)) + 
@@ -601,10 +610,33 @@ df_graphs_survey %>%
   lm(modularity ~ erq_reap_fr*trial_valence, . ) %>% 
   summary
 
+
 ```
 
+## Suppression
+
+```{r}
+df_graphs_survey %>% 
+  ggplot(aes(x = erq_supp_fr, y = modularity, color = trial_valence)) + 
+  geom_point(alpha = .3) + 
+  geom_smooth(method="lm")
+
+df_graphs_survey %>% 
+  filter(trial_valence == "negative" ) %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(modularity ~ erq_supp_fr, . ) %>% 
+  summary
+
+df_graphs_survey %>% 
+  filter(trial_valence == "negative" | trial_valence == "neutral") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(modularity ~ erq_supp_fr*trial_valence, . ) %>% 
+  summary
+
+```
 
 # Number of clusters
+
 ```{r}
 df_graphs_survey %>% 
   ggplot(aes(n_clusters)) +
@@ -710,6 +742,7 @@ df_graphs_survey %>%
 ```
 
 ## ERQ Reappraisal
+
 ```{r}
 df_graphs_survey %>% 
   ggplot(aes(x = erq_reap_fr, y = n_clusters, color = trial_valence)) + 
@@ -731,6 +764,7 @@ df_graphs_survey %>%
 ```
 
 ## ERQ suppression
+
 ```{r}
 df_graphs_survey %>% 
   ggplot(aes(x = erq_supp_fr, y = n_clusters, color = trial_valence)) + 
@@ -752,6 +786,7 @@ df_graphs_survey %>%
 ```
 
 ## PHQ
+
 ```{r}
 df_graphs_survey %>% 
   ggplot(aes(x = phq, y = n_clusters, color = trial_valence)) + 
@@ -772,6 +807,7 @@ df_graphs_survey %>%
 ```
 
 ## GAD
+
 ```{r}
 
 df_graphs_survey %>% 
@@ -793,6 +829,7 @@ df_graphs_survey %>%
 ```
 
 ## Fatigue
+
 ```{r}
 
 df_graphs_survey %>% 
@@ -818,92 +855,100 @@ df_graphs_survey %>%
 
 ```
 
-
 # Transitivity
+
+TODO:
+
+-   Look at transitivity restricting to nodes with a floor threshold degree
+
+    -   Barrat et al., 2004 - clustering coefficient varies as a power law function of degree - high degree nodes have lower clustering
+
 ## Alexithymia
 
 ```{r}
-## Full scale
+# -- Full scale -- #
 df_graphs_survey %>% 
   ggplot(aes(x = paq, y = transitivity, color = trial_valence)) + 
   geom_point(alpha = .3) + 
   geom_smooth(method="lm")
 df_graphs_survey %>% 
+  ggplot(aes(x = paq, y = transitivity_weighted, color = trial_valence)) + 
+  geom_point(alpha = .3) + 
+  geom_smooth(method="lm")
+df_graphs_survey %>% 
   filter(trial_valence == "negative") %>% 
   mutate_if(is.numeric, scale) %>% 
-  lm(transitivity ~ paq, .) %>% 
+  lm(transitivity_weighted ~ paq, .) %>% 
   summary
 df_graphs_survey %>% 
   filter(trial_valence == "neutral") %>% 
   mutate_if(is.numeric, scale) %>% 
-  lm(transitivity ~ paq, .) %>% 
+  lm(transitivity_weighted ~ paq, .) %>% 
   summary
 df_graphs_survey %>% 
   filter(trial_valence == "positive") %>% 
   mutate_if(is.numeric, scale) %>% 
-  lm(transitivity ~ paq, .) %>% 
+  lm(transitivity_weighted ~ paq, .) %>% 
   summary
 
 ## DIF
 
 df_graphs_survey %>% 
-  ggplot(aes(x = paq_dif, y = transitivity, color = trial_valence)) + 
+  ggplot(aes(x = paq_dif, y = transitivity_weighted, color = trial_valence)) + 
   geom_point(alpha = .3) + 
   geom_smooth(method="lm")
 
 # DDF
 df_graphs_survey %>% 
-  ggplot(aes(x = paq_ddf, y = transitivity, color = trial_valence)) + 
+  ggplot(aes(x = paq_ddf, y = transitivity_weighted, color = trial_valence)) + 
   geom_point(alpha = .3) + 
   geom_smooth(method="lm")
 
 ## EOT
 df_graphs_survey %>% 
-  ggplot(aes(x = paq_eot, y = transitivity, color = trial_valence)) + 
+  ggplot(aes(x = paq_eot, y = transitivity_weighted, color = trial_valence)) + 
   geom_point(alpha = .3) + 
   geom_smooth(method="lm")
 
 ## PAQ Pos
 df_graphs_survey %>% 
-  ggplot(aes(x = paq_pos, y = transitivity, color = trial_valence)) + 
+  ggplot(aes(x = paq_pos, y = transitivity_weighted, color = trial_valence)) + 
   geom_point(alpha = .3) + 
   geom_smooth(method="lm")
 df_graphs_survey %>% 
   filter(trial_valence == "negative") %>% 
   mutate_if(is.numeric, scale) %>% 
-  lm(transitivity ~ paq_pos, .) %>% 
+  lm(transitivity_weighted ~ paq_pos, .) %>% 
   summary
 df_graphs_survey %>% 
   filter(trial_valence == "neutral") %>% 
   mutate_if(is.numeric, scale) %>% 
-  lm(transitivity ~ paq_pos, .) %>% 
+  lm(transitivity_weighted ~ paq_pos, .) %>% 
   summary
 df_graphs_survey %>% 
   filter(trial_valence == "positive") %>% 
   mutate_if(is.numeric, scale) %>% 
-  lm(transitivity ~ paq_pos, .) %>% 
+  lm(transitivity_weighted ~ paq_pos, .) %>% 
   summary
   
 
 ## PAQ Neg 
 df_graphs_survey %>% 
-  ggplot(aes(x = paq_neg, y = transitivity, color = trial_valence)) + 
-  geom_point(alpha = .3) + 
+  ggplot(aes(x = paq_neg, y = transitivity_weighted, color = trial_valence)) +   geom_point(alpha = .3) + 
   geom_smooth(method="lm")
 df_graphs_survey %>% 
   filter(trial_valence == "negative") %>% 
   mutate_if(is.numeric, scale) %>% 
-  lm(transitivity ~ paq_neg, .) %>% 
+  lm(transitivity_weighted ~ paq_neg, .) %>% 
   summary
 df_graphs_survey %>% 
   filter(trial_valence == "neutral") %>% 
   mutate_if(is.numeric, scale) %>% 
-  lm(transitivity ~ paq_neg, .) %>% 
+  lm(transitivity_weighted ~ paq_neg, .) %>% 
   summary
 df_graphs_survey %>% 
   filter(trial_valence == "positive") %>% 
-  mutate_if(is.numeric, scale) %>% 
-  lm(transitivity ~ paq_neg, .) %>% 
+  mutate_if(is.numeric, scale) %>%   lm(transitivity_weighted ~ paq_neg, .) %>% 
   summary
   
 
@@ -911,6 +956,7 @@ df_graphs_survey %>%
 ```
 
 # Smallworldiness
+
 ```{r}
 ## Full scale
 df_graphs_survey %>% 
@@ -997,7 +1043,6 @@ df_graphs_survey %>%
    
   
 ```
-
 
 # Session Info
 
