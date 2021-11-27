@@ -1,0 +1,279 @@
+---
+title: "random_graphs"
+author: "Ashish"
+date: "11/9/2021"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+```
+
+# Generate random graph from process of task
+
+```{r}
+n_sims <- 1000
+n_stimuli <- 25
+n_trials <- 100
+produce_random_graph <- function(n_trials=n_trials, n_stimuli=n_stimuli){
+  stimuli <- paste0("stim_", 1:n_stimuli)
+  stimuli_grid <- expand_grid(v1=stimuli, v2=stimuli, v3=stimuli) %>% 
+    filter(v1 > v2 & v2 > v3) %>% 
+    sample_frac()
+  trial_result <- tibble(node1=rep(NA, n_trials*3), 
+                         node2=rep(NA, n_trials*3), 
+                         chosen=rep(NA, n_trials*3))
+  for(trial_num in (1:n_trials)-1){
+    stim <- unlist(stimuli_grid[trial_num+1, ])
+    chosen <- stim %>% 
+      sample(2) %>% 
+      sort
+    unchosen <- stim[!stim %in% chosen]
+    trial_result[(3*trial_num)+1,"node1"] <- chosen[1]
+    trial_result[(3*trial_num)+1,"node2"] <- chosen[2]
+    trial_result[(3*trial_num)+1,"chosen"] <- 1
+    trial_result[(3*trial_num)+2,"node1"] <- sort(c(chosen[1], unchosen))[1]
+    trial_result[(3*trial_num)+2,"node2"] <-  sort(c(chosen[1], unchosen))[2]
+    trial_result[(3*trial_num)+2,"chosen"] <- 0
+    trial_result[(3*trial_num)+3,"node1"] <-  sort(c(chosen[2], unchosen))[1]
+    trial_result[(3*trial_num)+3,"node2"] <-  sort(c(chosen[2], unchosen))[2]
+    trial_result[(3*trial_num)+3,"chosen"] <- 0
+  }
+  
+  df_edges <- trial_result %>% 
+    group_by(node1, node2) %>% 
+    summarize(weight = mean(chosen), .groups="drop") %>% 
+    filter(weight > 0)
+  g <- df_edges %>% 
+    graph_from_data_frame(directed=FALSE)
+  E(g)$weight <- df_edges$weight
+  return(g)
+}
+df_rand_graphs <- tibble(graph = map(1:n_sims, ~produce_random_graph(n_trials, n_stimuli)))
+df_rand_graphs_stats <- df_rand_graphs %>% 
+  # mutate(cluster = map(graph, cluster_walktrap)) %>%
+  mutate(cluster = map(graph, cluster_louvain)) %>%
+  mutate(modularity = map_dbl(cluster, modularity)) %>% 
+  mutate(transitivity = map_dbl(graph, transitivity)) %>% 
+  mutate(transitivity_weighted = map_dbl(graph, ~mean(transitivity(., "weighted", isolates="zero")))) %>% 
+  mutate(n_clusters = map_dbl(cluster, ~length(unique(.$membership)))) %>% 
+  
+  mutate(adjacency_mat = map(graph, ~get.adjacency(., attr="weight", sparse=FALSE))) %>% 
+  mutate(sparsity = map_dbl(adjacency_mat, ~ mean(. == 0))) %>% 
+
+    mutate(adjacency_mat_sparse = map(graph, ~get.adjacency(., attr="weight", sparse=TRUE))) %>% 
+  mutate(tsvd = map(adjacency_mat_sparse, ~sparsesvd::sparsesvd(.) )) %>% 
+  mutate(tsvd_pr_var = map(tsvd, ~.$d/sum(.$d) )) %>% 
+  mutate(density = map_dbl(graph, edge_density)) %>% 
+  ungroup
+
+df_rand_graphs_stats %>% 
+  ggplot(aes(x = transitivity_weighted)) + 
+  geom_histogram(bins=30) + 
+  geom_vline(xintercept = df_rand_graphs_stats$transitivity_weighted %>% mean)
+  
+df_rand_graphs_stats$transitivity_weighted %>% mean
+df_rand_graphs_stats$transitivity_weighted %>% sd
+df_rand_graphs_stats$transitivity_weighted %>% sd/sqrt(n_sims)
+
+
+df_rand_graphs_stats %>% 
+  ggplot(aes(x = density)) + 
+  geom_histogram(bins=50)
+
+df_rand_graphs_stats$modularity %>% mean
+df_rand_graphs_stats %>% 
+  ggplot(aes(x = modularity)) + 
+  geom_histogram(bins=50)
+
+
+
+cor.test(df_rand_graphs_stats$density, df_rand_graphs_stats$transitivity_weighted)
+cor.test(df_rand_graphs_stats$modularity, df_rand_graphs_stats$transitivity_weighted)
+cor.test(df_rand_graphs_stats$modularity, df_rand_graphs_stats$density)
+```
+
+## Generate random graph from transitivity focused experiment design
+
+### by adj matrix
+Here I design an algorithm to specifically participants' transitivity. 
+
+1. Present random trials with constraint of showing all images at least once. With 25 images, we can do this in 9 trials. 
+
+2. For each trial, look in adjacency matrix in each column for incomplete triangles. Select incomplete triangles that have  
+```{r}
+
+n_stimuli <- 9
+n_trials <- 48
+stimuli <- paste0("stim_", str_pad((1:n_stimuli), 2, pad="0"))
+
+# initial_stimuli_grid <- expand_grid(v1=stimuli, v2=stimuli, v3=stimuli) %>%
+#   filter(as.numeric(substr(v1, 6, 7)) - as.numeric(substr(v2, 6, 7)) == -1 &
+#            as.numeric(substr(v2, 6, 7)) - as.numeric(substr(v3, 6, 7)) == -1)
+initial_stimuli_grid <- matrix(stimuli, byrow = T, nrow = n_stimuli/3) %>%
+  as_tibble(.name_repair=~c("v1", "v2", "v3"))
+
+trial_result <- tibble(node1=rep(NA, n_trials*3), 
+                       node2=rep(NA, n_trials*3), 
+                       chosen=rep(NA, n_trials*3))
+# -- initial random section -- #
+for(trial_num in (1:nrow(initial_stimuli_grid))-1){
+  stim <- unlist(initial_stimuli_grid[trial_num+1, ])
+  chosen <- stim %>% 
+    sample(2) %>% 
+    sort
+  unchosen <- stim[!stim %in% chosen]
+  trial_result[(3*trial_num)+1,"node1"] <- chosen[1]
+  trial_result[(3*trial_num)+1,"node2"] <- chosen[2]
+  trial_result[(3*trial_num)+1,"chosen"] <- 1
+  trial_result[(3*trial_num)+2,"node1"] <- sort(c(chosen[1], unchosen))[1]
+  trial_result[(3*trial_num)+2,"node2"] <-  sort(c(chosen[1], unchosen))[2]
+  trial_result[(3*trial_num)+2,"chosen"] <- 0
+  trial_result[(3*trial_num)+3,"node1"] <-  sort(c(chosen[2], unchosen))[1]
+  trial_result[(3*trial_num)+3,"node2"] <-  sort(c(chosen[2], unchosen))[2]
+  trial_result[(3*trial_num)+3,"chosen"] <- 0
+}
+
+# -- second random section -- #
+# creating second arm of triangle
+initial_chosen <- trial_result %>% 
+  filter(chosen == 1)
+for(trial_num in (1:nrow(initial_chosen))-1){
+  third_stim <- sample(
+    stimuli[stimuli != initial_chosen[[trial_num+1, "node1"]] &
+              stimuli != initial_chosen[[trial_num+1, "node2"]]],
+    
+    1)
+  stim <- c(initial_chosen[[trial_num+1, "node1"]], 
+            initial_chosen[[trial_num+1, "node2"]], 
+            third_stim)
+  chosen <- stim %>% 
+    sample(2) %>% 
+    sort
+  unchosen <- stim[!stim %in% chosen]
+  nrows_filled <- nrow(initial_stimuli_grid)*3
+  trial_result[(3*trial_num)+1+nrows_filled,"node1"] <- chosen[1]
+  trial_result[(3*trial_num)+1+nrows_filled,"node2"] <- chosen[2]
+  trial_result[(3*trial_num)+1+nrows_filled,"chosen"] <- 1
+  trial_result[(3*trial_num)+2+nrows_filled,"node1"] <-
+    sort(c(chosen[1], unchosen))[1]
+  trial_result[(3*trial_num)+2+nrows_filled,"node2"] <- 
+    sort(c(chosen[1], unchosen))[2]
+  trial_result[(3*trial_num)+2+nrows_filled,"chosen"] <- 0
+  trial_result[(3*trial_num)+3+nrows_filled,"node1"] <- 
+    sort(c(chosen[2], unchosen))[1]
+  trial_result[(3*trial_num)+3+nrows_filled,"node2"] <- 
+    sort(c(chosen[2], unchosen))[2]
+  trial_result[(3*trial_num)+3+nrows_filled,"chosen"] <- 0
+}
+
+
+
+# -- testing transitivity (third arm of triangle) -- #
+
+# make adjacency matrix
+adj_mat <- expand_grid(node1=stimuli, node2=stimuli) %>% 
+  mutate(values=0) %>% 
+  pivot_wider(
+    id_cols="node1",
+    names_from="node2",
+    values_from="values"
+  ) %>% 
+  select(-node1) %>% 
+  as.matrix()
+rownames(adj_mat) <- stimuli
+trial_result_chosen <- trial_result %>% 
+  filter(chosen==1)
+for(i in 1:nrow(trial_result_chosen)){
+  node1 <- trial_result_chosen[[i, "node1"]]
+  node2 <- trial_result_chosen[[i, "node2"]]
+  adj_mat[node1, node2] <- trial_result_chosen[[i, "chosen"]]
+  adj_mat[node2, node1] <- trial_result_chosen[[i, "chosen"]]
+}
+stim_w_incomplete_triangles <- colnames(adj_mat)[colSums(adj_mat) >= 2]
+random_stim_incomplete_triangle <- sample(stim_w_incomplete_triangles, 1)
+adj_mat_col <- adj_mat[,random_stim_incomplete_triangle]
+candidate_stim_to_test <- names(adj_mat_col[adj_mat_col==1])
+trial_result
+
+
+
+# # -- building graph -- #
+# df_edges <- trial_result %>% 
+#   group_by(node1, node2) %>% 
+#   summarize(weight = mean(chosen), .groups="drop") %>% 
+#   filter(weight > 0)
+# g <- df_edges %>% 
+#   graph_from_data_frame(directed=FALSE)
+# E(g)$weight <- df_edges$weight
+
+
+
+```
+
+### other method
+
+```{r}
+n_sims <- 1000
+n_stimuli <- 24
+n_trials <- 50
+stimuli <- paste0("stim_", str_pad((1:n_stimuli), 2, pad="0"))
+
+produce_random_graph <- function(n_trials=n_trials, n_stimuli=n_stimuli){
+  # initial_stimuli_grid <- expand_grid(v1=stimuli, v2=stimuli, v3=stimuli) %>%
+  #   filter(as.numeric(substr(v1, 6, 7)) - as.numeric(substr(v2, 6, 7)) == -1 &
+  #            as.numeric(substr(v2, 6, 7)) - as.numeric(substr(v3, 6, 7)) == -1)
+    # sample_frac() # uncomment for simulations
+  initial_stimuli_grid <- matrix(stimuli, byrow = T, nrow = n_stimuli/3) %>%
+    as_tibble(.name_repair=~c("v1", "v2", "v3"))
+  
+  trial_result <- tibble(node1=rep(NA, n_trials*3), 
+                         node2=rep(NA, n_trials*3), 
+                         chosen=rep(NA, n_trials*3))
+  # -- initial random section -- #
+  for(trial_num in (1:nrow(initial_stimuli_grid))-1){
+    stim <- unlist(initial_stimuli_grid[trial_num+1, ])
+    chosen <- stim %>% 
+      sample(2) %>% 
+      sort
+    unchosen <- stim[!stim %in% chosen]
+    trial_result[(3*trial_num)+1,"node1"] <- chosen[1]
+    trial_result[(3*trial_num)+1,"node2"] <- chosen[2]
+    trial_result[(3*trial_num)+1,"chosen"] <- 1
+    trial_result[(3*trial_num)+2,"node1"] <- sort(c(chosen[1], unchosen))[1]
+    trial_result[(3*trial_num)+2,"node2"] <-  sort(c(chosen[1], unchosen))[2]
+    trial_result[(3*trial_num)+2,"chosen"] <- 0
+    trial_result[(3*trial_num)+3,"node1"] <-  sort(c(chosen[2], unchosen))[1]
+    trial_result[(3*trial_num)+3,"node2"] <-  sort(c(chosen[2], unchosen))[2]
+    trial_result[(3*trial_num)+3,"chosen"] <- 0
+  }
+  # -- testing transitivity -- #
+  
+  # pick a random node
+  rand_stimulus1 <- sample(stimuli, 1)
+  # look for incomplete triangles that have not been tested
+  trial_result %>% 
+    filter(node1==rand_stimulus1 | node2==rand_stimulus1)
+  
+  trial_result %>% 
+    filter(node1==rand_stimulus1 | node2==rand_stimulus1)
+  # if found an incomplete triangle that has not been tested
+  
+  # if can't find an incomplete triangle that has not been tested
+  rand_stimulus2 <- sample(stimuli[stimuli!=rand_stimulus1], 1)
+  rand_stimulus3 <- sample(stimuli[stimuli!=rand_stimulus1 &
+                                     stimuli!=rand_stimulus2], 1)
+  # test a random node
+  
+  
+  # -- building graph -- #
+  df_edges <- trial_result %>% 
+    group_by(node1, node2) %>% 
+    summarize(weight = mean(chosen), .groups="drop") %>% 
+    filter(weight > 0)
+  g <- df_edges %>% 
+    graph_from_data_frame(directed=FALSE)
+  E(g)$weight <- df_edges$weight
+  return(g)
+}
+```

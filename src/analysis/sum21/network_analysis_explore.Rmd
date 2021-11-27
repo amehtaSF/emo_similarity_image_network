@@ -1,0 +1,1875 @@
+---
+title: "Exploratory analysis of emotion similarity networks"
+author: "Ashish"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    number_sections: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    theme: paper
+---
+
+In this document, I am conducting exploratory analyses of the recently developed emotion similarity network task. In the task, participants select which two of a set of three emotional images are most similar in their emotional quality. I hypothesize that participants who exhibit self-report characteristics of greater emotional awareness will have more distinct communities in a within person network analysis of each participants' similarity structure.
+
+-   [clustering coefficient](https://en.wikipedia.org/wiki/Clustering_coefficient)
+
+-   [small world networks](https://en.wikipedia.org/wiki/Small-world_network)
+
+-   [mean shortest path length](https://en.wikipedia.org/wiki/Distance_(graph_theory)) - determines if network is small world
+
+-   How does one characterize an empirical degree distribution? Is there anything meaningful there for me?
+
+# Initialization
+
+```{r, message=FALSE}
+rm(list=ls())
+library(lmerTest)
+library(igraph)
+library(qgraph)
+library(kableExtra)
+library(here)
+library(tidyverse)
+theme_set(theme_bw())
+```
+
+```{r, eval=FALSE}
+library(tidylog)
+```
+
+```{r}
+select <- function(...) dplyr::select(...)
+```
+
+# Preprocessing
+
+## Functions
+
+```{r}
+#' scale_numerics
+#' 
+#' z-scores values of all numeric columns
+#' 
+#' @param df input dataframe
+#' @param new_cols boolean indicating whether to create new columns when scaling or scale in place
+#' @param ... arguments to be passed to rsurveyutils::scale()
+#'
+#' @return dataframe with scaled values
+scale_numerics <- function(df, new_cols=TRUE, ...){
+  
+  if(new_cols){df %>% mutate_if(is.numeric, list(sc = ~rsurveyutils::scale(., ...)))}
+  else {df %>% mutate_if(is.numeric,  ~scale(., ...))}
+}
+
+```
+
+## Read & process survey data
+
+```{r message=FALSE}
+survey_filepath <- "data/proc/emo_similarity_network_presurvey_sum2021_proc.csv"
+
+df_survey_raw <- read_csv(here(survey_filepath))
+
+df_survey <- df_survey_raw %>% 
+  group_by(pid) %>%
+  # -- remove failed attention checks -- #
+  filter((all(ac_paq_pass == 1) & 
+            all(ac_pmerq_pass == 1) & 
+            all(ac_tas_pass == 1))) %>% 
+  # -- remove people who did it twice -- #
+  filter(n() ==1) %>% 
+  ungroup
+```
+
+## Read & process task data
+
+```{r, message=FALSE}
+task_filepath <- "data/proc/emoSimilarityTask_proc.csv"
+
+df_task_raw <- read_csv(here(task_filepath))
+
+df_task <- df_task_raw
+```
+
+## Create data frame of forced choice attention checks
+
+Currently using a .33 minimum threshold of passing attention checks
+
+.33 = 4 correct out of 12
+
+```{r}
+ac_minimum_threshold <- .33
+
+df_ac_forceChoice <- df_task %>% 
+  drop_na(ac_forceChoice) %>% 
+  group_by(pid, pool) %>% 
+  summarize(pr_correct = mean(ac_forceChoice)) %>% 
+  ungroup
+df_ac_forceChoice %>% 
+  ggplot(aes(x = pr_correct)) + 
+  geom_histogram()
+ac_fail_pids <- df_ac_forceChoice %>% 
+  filter(pr_correct < ac_minimum_threshold) %>% 
+  pull(pid)
+
+# df_ac_forceChoice %>% 
+#   filter(pool == "rep" & pr_correct < .33)
+  
+```
+
+## Create data frame of task trials
+
+```{r}
+df_incomplete_runs <- df_task %>% 
+  group_by(pid, run_id) %>% 
+  summarize(n = n()) %>% 
+  filter(n < 347)
+
+df_remove_secondTry_pids <- df_task %>% 
+  filter(!run_id %in% df_incomplete_runs$run_id) %>% 
+  group_by(pid, run_id) %>% 
+  summarize(n = n()) %>% 
+  arrange(run_id) %>% 
+  slice(1)
+
+
+
+df_trials <- df_task %>% 
+  # -- keep only trials -- #
+  filter(trial_type == "image-multi-select") %>%
+  filter(!str_detect(img_file_1, "practice_images")) %>%
+  # -- remove AC fails -- #
+  filter(!pid %in% ac_fail_pids) %>% 
+  # -- remove incomplete runs -- #
+  filter(!run_id %in% df_incomplete_runs$run_id) %>%
+  # -- remove second attempts --#
+  filter(run_id %in% df_remove_secondTry_pids$run_id) %>%
+  # -- preproc -- #
+  select(pid, trial_index, trial_valence,
+         img_file_chosen_1, img_file_chosen_2,
+         img_file_1, img_file_2, img_file_3) %>% 
+  pivot_longer(c(img_file_1, img_file_2, img_file_3), 
+               values_to="img_file", names_to="label") %>% 
+  mutate(is_chosen=ifelse(img_file == img_file_chosen_1 | 
+                            img_file == img_file_chosen_2, 
+                          1, 0)) %>% 
+  mutate(trial_valence = factor(trial_valence, levels = c("neutral", "negative", "positive"))) %>% 
+  select(-c(img_file_chosen_1, img_file_chosen_2)) %>% 
+  arrange(pid, trial_index, img_file)
+
+df_trials_wide <- df_trials %>% 
+  arrange(pid, trial_index, desc(is_chosen), img_file) %>% 
+  select(-label) %>% 
+  group_by(pid, trial_index, trial_valence) %>% 
+  mutate(img_num = 1:n()) %>% 
+  ungroup %>% 
+  pivot_wider(id_cols = c(pid, trial_index, trial_valence), 
+              names_from = img_num, values_from=c(img_file, is_chosen)) 
+
+df_trials_chosen <- df_trials_wide %>% 
+  select(pid, trial_index, trial_valence, img_file_1, img_file_2) %>% 
+  mutate(chosen = 1)
+df_trials_unchosen1 <- df_trials_wide %>% 
+  select(pid, trial_index, trial_valence, img_file_1, img_file_3) %>% 
+  rename(img_file_2 = img_file_3) %>% 
+  mutate(chosen = 0)
+df_trials_unchosen2 <- df_trials_wide %>% 
+  select(pid, trial_index, trial_valence, img_file_2, img_file_3) %>% 
+  rename(img_file_1 = img_file_2) %>% 
+  rename(img_file_2 = img_file_3) %>% 
+  mutate(chosen = 0)
+df_trials_weights <- df_trials_chosen %>% 
+  bind_rows(df_trials_unchosen1) %>% 
+  bind_rows(df_trials_unchosen2) %>% 
+  # -- standardize placement of images files in img_file_1 or img_file_2 -- #
+  mutate(img1_tmp = map2_chr(img_file_1, img_file_2, ~sort(c(.x, .y))[1])) %>% 
+  mutate(img2_tmp = map2_chr(img_file_1, img_file_2, ~sort(c(.x, .y))[2])) %>% 
+  mutate(img_file_1 = img1_tmp) %>% 
+  mutate(img_file_2 = img2_tmp) %>% 
+  select(-img1_tmp, -img2_tmp)
+  
+  
+
+```
+
+# Create graphs community structure and fit clustering
+
+[A Comparative Analysis of Community Detection Algorithms on Artificial Networks](https://www.nature.com/articles/srep30750.pdf)
+
+Two ways of making graphs:
+
+-   Only consider when images were chosen together
+
+-   Factor in when images were chosen together and when they were not chosen together
+
+Transitivity
+
+-   Weighted transitivity metric: Barrat et al., 2004
+
+    -   right now, it's showing NaN for a lot of people. Maybe people who have lone unconnected nodes??
+
+Notes:
+
+-   igraph will include an edge even if the weight between the two nodes is 0. If I include the delete.edges line, I delete those edges where the images were never selected as similar. If I include the filter(pr_chosen \> 0) line then it keeps edges between some of the nodes. Why are these two things different??? (see commented out code for an example)
+
+```{r}
+# get_graph <- function(df=df_trials_wide){
+#    df %>%
+#     select(img_file_1, img_file_2) %>%
+#     graph_from_data_frame(directed=FALSE)
+# }
+
+# # Sum chosen
+# get_graph <- function(df){
+#   # Takes a dataframe with a single participant and single trial valence
+#   dat <- df %>%
+#     group_by(img_file_1, img_file_2) %>%
+#     summarize(sum_chosen = sum(chosen)) %>%
+#     ungroup
+#   g <- dat %>%
+#     select(img_file_1, img_file_2) %>%
+#     graph_from_data_frame(directed=FALSE)
+#   E(g)$weight <- dat$sum_chosen
+#   return(g)
+# }
+
+# Proportion chosen 
+get_graph <- function(df){
+  # Takes a dataframe with a single participant and single trial valence
+  dat <- df %>%
+    group_by(img_file_1, img_file_2) %>%
+    summarize(pr_chosen = mean(chosen), .groups = "drop_last") %>%
+    filter(pr_chosen > 0) %>%
+    ungroup
+  g <- dat %>%
+    select(img_file_1, img_file_2) %>%
+    graph_from_data_frame(directed=FALSE)
+  E(g)$weight <- dat$pr_chosen
+  # g <- delete.edges(g, which(E(g)$weight == 0))
+  return(g)
+}
+
+
+# dat <- df_trials_weights %>%
+#   filter(pid == 96526) %>%
+#   group_by(pid, trial_valence, img_file_1, img_file_2) %>%
+#   filter(trial_valence=="neutral") %>%
+#   summarize(pr_chosen = mean(chosen)) %>%
+#   tidylog::filter(pr_chosen != 0) %>%
+#   ungroup
+# g <- dat %>%
+#   select(img_file_1, img_file_2) %>%
+#   graph_from_data_frame(directed=FALSE)
+# E(g)
+# E(g)$weight <- dat$pr_chosen
+# g <- delete.edges(g, which(E(g)$weight == 0))
+# E(g)
+# E(g)$weight
+# plot(
+#   cluster_walktrap(g),
+#   g,
+#   vertex.size = strength(g),
+#   vertex.frame.color = NA,
+#   vertex.label.cex = .7,
+#   vertex.label.color = "black",
+#   edge.curved = .2,
+#   edge.width = E(g)$weight,
+#   layout = layout.fruchterman.reingold(g)
+# )
+```
+
+## Calculate graph measures
+```{r}
+df_graphs <- df_trials_weights %>% 
+  group_by(pid, trial_valence) %>% 
+  nest() %>%
+  mutate(graph = map(data, get_graph)) %>% 
+  
+  # mutate(cluster = map(graph, cluster_walktrap)) %>%
+  mutate(cluster = map(graph, cluster_louvain)) %>%
+  mutate(modularity = map_dbl(cluster, modularity)) %>% 
+  mutate(transitivity = map_dbl(graph, transitivity)) %>% 
+  mutate(transitivity_weighted = map_dbl(graph, ~mean(transitivity(., "weighted", isolates="zero")))) %>% 
+  # mutate(smallworldness = map_dbl(graph, ~smallworldness(.)["smallworldness"])) %>% # takes a ridiculous amount of time
+  mutate(n_clusters = map_dbl(cluster, ~length(unique(.$membership)))) %>% 
+  
+  mutate(adjacency_mat = map(graph, ~get.adjacency(., attr="weight", sparse=FALSE))) %>% 
+  mutate(sparsity = map_dbl(adjacency_mat, ~ mean(. == 0))) %>% 
+  mutate(adjacency_mat_sparse = map(graph, ~get.adjacency(., attr="weight", sparse=TRUE))) %>% 
+  # mutate(tsvd = map(adjacency_mat_sparse, ~sparsesvd::sparsesvd(.) )) %>% 
+  # mutate(tsvd_pr_var = map(tsvd, ~.$d/sum(.$d) )) %>% 
+  # mutate(tsvd_3comp_var = map_dbl(tsvd_pr_var, ~.[1]+.[2]+.[3] )) %>% 
+  # mutate(diameter = map_dbl(graph, diameter )) %>%
+  mutate(statnet_graph = map(adjacency_mat, ~network::as.network(., 
+                                                        directed=FALSE, 
+                                                        matrix.type="a",
+                                                        ignore.eval=FALSE,
+                                                        names.eval="weight"))) %>% 
+  ungroup
+
+
+```
+
+# Combine graphs and survey
+
+```{r}
+df_graphs_survey <- df_graphs %>% 
+  inner_join(df_survey) 
+```
+
+# Export data to file
+```{r}
+# for(i in 1:nrow(df_graphs_survey)){
+#   fname <- paste0("statnet_",df_graphs_survey$trial_valence[[i]], "_", df_graphs_survey$pid[[i]], ".rds")
+#   saveRDS(df_graphs_survey$statnet_graph[[i]], 
+#           file=file.path("data", "proc", "statnetGraphs", fname))
+# }
+# saveRDS(df_graphs_survey, file="data/proc/df_graphs_survey.rda")
+```
+
+
+```{r, echo=FALSE}
+# ------ End Preprocessing ------ #
+# ----- Run all chunks above -----#
+```
+
+# Sample characteristics
+
+## Number of rows per participant
+
+```{r}
+df_trials_weights %>% 
+  group_by(pid) %>% 
+  summarise(n = n()) %>% 
+  arrange(n) %>% 
+  kbl %>% 
+  kable_styling %>% 
+  scroll_box(height="500px", width = "300px")
+
+df_trials_weights %>% pull(pid) %>% unique
+df_trials_weights %>% pull(pid) %>% unique %>% length
+```
+
+## Response time distribution
+
+```{r}
+# participant mean response time
+df_task %>% 
+  mutate(rt = as.numeric(rt)/1000) %>% 
+  filter(rsurveyutils::scale(rt) < 3) %>% # remove outliers if 3 SDs above mean
+  group_by(pid) %>% 
+  summarize(mean_rt = mean(rt)) %>% 
+  ggplot(aes(x = mean_rt)) + 
+  geom_histogram()
+
+# trial response time
+df_task %>% 
+  mutate(rt = as.numeric(rt)/1000) %>% 
+  filter(rsurveyutils::scale(rt) < 3) %>% # remove if 3 SDs above mean
+  ggplot(aes(x = rt)) + 
+  geom_histogram()
+
+```
+
+## Plot total time spent on survey
+
+```{r}
+df_task %>% 
+  group_by(run_id) %>% 
+  filter(time_elapsed == max(time_elapsed)) %>% 
+  ungroup %>% 
+  mutate(mins_elapsed = as.numeric(time_elapsed)/(1000*60)) %>% 
+  ggplot(aes(x = mins_elapsed)) + 
+  geom_histogram()
+df_task %>% 
+  group_by(run_id) %>% 
+  filter(time_elapsed == max(time_elapsed)) %>% 
+  ungroup %>% 
+  mutate(mins_elapsed = as.numeric(time_elapsed)/(1000*60)) %>% 
+  summarize(median(mins_elapsed))
+```
+
+## Histogram sparsity of adjacency matrix
+
+```{r}
+df_graphs$sparsity %>% hist
+```
+
+# Plot all participant networks and clusters and export to PDF
+
+I'm also including their PAQ score and their responses to the attention checks in the within person network PDFs.
+
+```{r eval=FALSE}
+clusterPlots_dir <- here(paste0("results/", Sys.Date(), "/clusterPlots"))
+dir.create(clusterPlots_dir, recursive=TRUE)
+pdf(paste0(clusterPlots_dir, "/pid_valence_clusterPlots.pdf"))
+for(i in 1:nrow(df_graphs)){
+  g <- df_graphs$graph[[i]]
+  plot(
+    df_graphs$cluster[[i]],
+    g,
+    # vertex.size = 10,
+    vertex.size = strength(g),
+    vertex.frame.color = NA,
+    vertex.label.cex = .7,
+    vertex.label.color = "black",
+    # vertex.label = NA,
+    edge.curved = .2,
+    edge.width = E(g)$weight,
+    # layout = qgraph.layout.fruchtermanreingold(
+    #   get.edgelist(g, names=F),
+    #   vcount=vcount(g)
+    #   # repulse.rad = .1,
+    #   # cool.exp = 1.5
+    # )
+    layout = layout.fruchterman.reingold(df_graphs$graph[[i]])
+  )
+# get free response dimensions of clustering
+  freeResp <- df_task %>%
+    dplyr::filter(pid == df_graphs$pid[[i]]) %>%
+    dplyr::filter(ac_freeResp != "") %>%
+    dplyr::filter(trial_valence == df_graphs$trial_valence[[i]]) %>%
+    pull(ac_freeResp)
+  if(length(freeResp) > 0){
+    text(0,-1.4, labels=paste(freeResp, collapse = "\n"))
+  }
+  # print pid
+  text(-1.2,1.4, labels=paste("PID: ", df_graphs$pid[[i]]))
+  # get attention check score
+  pr_correct <- df_ac_forceChoice %>%
+    dplyr::filter(pid == df_graphs$pid[[i]]) %>%
+    pull(pr_correct)
+  text(-1.2,1.3, labels=paste("Att check correct pr:", round(pr_correct, 2)))
+  # print sparsity
+  text(-1.2,1.2, labels=paste("Adj matrix sparsity: ", round(df_graphs$sparsity[[i]], 2)))
+  # print modularity
+  text(-1.2,1.1, labels=paste("Modularity: ", round(df_graphs$modularity[[i]], 2)))
+  # get PAQ score
+  paq_score <- df_survey %>%
+    dplyr::mutate(paq = rsurveyutils::scale(paq)) %>%
+    dplyr::filter(pid == df_graphs$pid[[i]]) %>%
+    pull(paq)
+    text(-1.2,seq(1.0, by = -.1, length.out = length(paq_score)),
+         labels=paste("PAQ:", round(paq_score, 2)))
+
+}
+dev.off()
+```
+
+# Exploring structural equivalence
+```{r}
+g <- df_graphs
+```
+
+# Between person network
+
+## Plot between participant networks
+
+### Negative valence
+
+-   Why is strength not showing in centralityPlot function?
+-   Why is eigencentrality and closeness inversely correlated
+
+```{r}
+df_graph_full_neg <- df_trials_weights %>% 
+  filter(trial_valence == "negative") %>% 
+  group_by(img_file_1, img_file_2) %>% 
+  summarize(weight = mean(chosen)) %>% 
+  ungroup %>% 
+  filter(weight > 0)
+graph_full_neg <- df_graph_full_neg %>% 
+  select(img_file_1, img_file_2) %>% 
+  graph_from_data_frame(directed=FALSE)
+E(graph_full_neg)$weight <- df_graph_full_neg$weight
+
+graph_full_neg %>% 
+   plot(
+    cluster_walktrap(.),
+    .,
+    vertex.size = strength(.)/30,
+    vertex.frame.color = NA,
+    vertex.label.cex = .7,
+    vertex.label.color = "black",
+    # vertex.label = NA,
+    edge.curved = .2,
+    edge.width = E(.)$weight,
+    layout = layout.fruchterman.reingold(.)
+    # layout = layout.kamada.kawai(.)
+   )
+
+
+# centralityPlot(graph_full_neg, scale="raw", include = c("Strength", "Betweenness", "Closeness"))
+hist(E(graph_full_neg)$weight)
+
+# Plot centrality measures
+tibble(
+  node = names(betweenness(graph_full_neg)),
+  betweenness = betweenness(graph_full_neg),
+  eigencentrality = eigen_centrality(graph_full_neg)$vector[node],
+  strength = strength(graph_full_neg)[node],
+  closeness = closeness(graph_full_neg)[node],
+  weightedTransitivity = transitivity(graph_full_neg, "weighted")
+) %>% 
+  pivot_longer(-node, names_to = "measure") %>% 
+  ggplot(aes(x = node, y = value)) + 
+  geom_point() + 
+  geom_line(aes(group = measure)) + 
+  facet_grid(~measure, scale ="free_x") + 
+  coord_flip()
+```
+
+
+#### Exploring structural equivalence of stimuli
+
+Correlation matrix of adjacency matrix
+Clustering with Kmeans
+```{r}
+library(factoextra)
+graph_full_neg_cor <- graph_full_neg %>% 
+  as_adj(attr="weight", sparse=F) %>% 
+  cor 
+graph_full_neg_cor %>% 
+  kbl %>% 
+  kable_styling()
+
+group_ids_6 <- kmeans(graph_full_neg_cor, centers = 6)
+group_ids_5 <- kmeans(graph_full_neg_cor, centers = 5)
+
+fviz_nbclust(graph_full_neg_cor, kmeans, method = "wss", k.max = 24) + theme_minimal() + ggtitle("the Elbow Method")
+
+
+graph_full_neg %>% 
+   plot(
+    cluster_louvain(.),
+    .,
+    vertex.size = strength(.)/10,
+    vertex.color = group_ids_5$cluster, 
+    vertex.frame.color = NA,
+    vertex.label.cex = .7,
+    vertex.label.color = "black",
+    # vertex.label = NA,
+    edge.curved = .2,
+    edge.width = E(.)$weight,
+    layout = layout.fruchterman.reingold(.)
+    # layout = layout.kamada.kawai(.)
+   )
+
+graph_from_adjacency_matrix(graph_full_neg_cor,
+                            weighted=T,
+                            mode="undirected",
+                            diag=F) %>%    
+  plot(
+    cluster_spinglass(.),
+    .,
+    # vertex.size = strength(.)/10,
+    # vertex.color = group_ids_5$cluster, 
+    vertex.frame.color = NA,
+    vertex.label.cex = .7,
+    vertex.label.color = "black",
+    # vertex.label = NA,
+    edge.curved = .2,
+    edge.width = E(.)$weight,
+    layout = layout.fruchterman.reingold(.)
+   )
+
+# -- copy images to folders by cluster membership -- #
+```
+
+
+# Block model
+
+```{r}
+
+```
+
+
+
+
+### Neutral valence
+
+### Positive valence
+
+-   Why do I need to filter weight \> 0 to show betweenness
+-   Why can't I see strength in `centralityPlot()` ?
+-   Why are centrality metrics all the same
+
+```{r}
+df_graph_full_neutral <- df_trials_weights %>% 
+  filter(trial_valence == "neutral") %>% 
+  group_by(img_file_1, img_file_2) %>% 
+  summarize(weight = mean(chosen)) %>% 
+  ungroup %>% 
+  filter(weight >0)
+graph_full_neutral <- df_graph_full_neutral %>% 
+  select(img_file_1, img_file_2) %>% 
+  graph_from_data_frame(directed=FALSE)
+E(graph_full_neutral)$weight <- df_graph_full_neutral$weight
+# graph_full_neutral$weight <- df_graph_full_neutral$weight
+graph_full_neutral %>% 
+   plot(
+    cluster_walktrap(.),
+    .,
+    vertex.size = strength(.)/30,
+    vertex.frame.color = NA,
+    vertex.label.cex = .7,
+    vertex.label.color = "black",
+    # vertex.label = NA,
+    edge.curved = .2,
+    # edge.width = E(.)$weight,
+    edge.width = E(.)$weight,
+    layout = layout.fruchterman.reingold(.)
+    # layout = layout.kamada.kawai(.)
+   )
+centralityPlot(graph_full_neutral, include = c("Strength", "Betweenness", "Closeness"))
+hist(E(graph_full_neutral)$weight)
+betweenness(graph_full_neutral)
+```
+
+# Export adjacency matrices of participants
+
+```{r}
+adjMatrix_dir <- here(paste0("data/proc/adjacencyMatrices/", Sys.Date(), "/"))
+dir.create(adjMatrix_dir, recursive=TRUE)
+for(i in 1:nrow(df_graphs)){
+  adj_mat <- get.adjacency(df_graphs$graph[[i]], attr="weight", sparse=FALSE)
+  # print(dim(adj_mat))
+  write.csv(x=adj_mat, file=paste0(adjMatrix_dir, df_graphs$pid[[i]], "_", 
+                                   df_graphs$trial_valence[[i]], "_adjMatrix.csv"))
+}
+
+```
+
+# Differences by trial valence
+
+Here I'm exploring whether network metrics are different depending on what valence type of block the participant was in
+
+## Modularity metric per trial valence
+
+[Modularity metric](https://en.wikipedia.org/wiki/Modularity_(networks))
+
+```{r}
+df_graphs %>% 
+  ggplot(aes(y = modularity, x = trial_valence)) + 
+  # geom_point(alpha = .3, position=position_jitter(.1)) +
+  stat_summary(fun.data = "mean_cl_boot") 
+
+df_graphs %>% 
+  lmer(modularity ~ (1|pid), .) %>% 
+  summary
+df_graphs %>% 
+  lmer(modularity ~ trial_valence + (1|pid), .) %>% 
+  summary
+```
+
+## Mean clusters per trial valence
+
+```{r}
+df_graphs %>% 
+  ggplot(aes(y = n_clusters, x = trial_valence)) + 
+  # geom_point(alpha = .3, position=position_jitter(.1)) + 
+  stat_summary(fun.data = "mean_cl_boot") 
+
+df_graphs %>% 
+  lmer(n_clusters ~ (1|pid), .) %>% 
+  summary
+df_graphs %>% 
+  lmer(n_clusters ~ trial_valence + (1|pid), .) %>% 
+  summary
+
+```
+
+# Relationship between modularity metric and number of clusters metric
+
+```{r}
+cor.test(df_graphs$modularity, df_graphs$n_clusters)
+```
+
+# Modularity
+
+## Alexithymia
+
+```{r}
+df_graphs_survey %>% 
+  ggplot(aes(x = paq, y = modularity, color = trial_valence)) + 
+  geom_point(alpha = .3) + 
+  geom_smooth(method="lm")
+df_graphs_survey %>% 
+  ggplot(aes(x = paq, y = modularity, color = trial_valence)) + 
+  geom_point(alpha = .3) + 
+  geom_smooth()
+
+df_graphs_survey %>%
+  mutate_at(vars(modularity, paq), scale) %>% 
+  lmer(modularity ~ paq*trial_valence + (1|pid), .) %>%
+  summary
+
+# df_graphs_survey %>%
+#   mutate_at(vars(modularity, paq), scale) %>% 
+#   lmer(modularity ~ paq + (1|pid), .) %>%
+#   summary
+```
+
+## Reappraisal
+
+```{r}
+df_graphs_survey %>% 
+  ggplot(aes(x = erq_reap_fr, y = modularity, color = trial_valence)) + 
+  geom_point(alpha = .3) + 
+  geom_smooth(method="lm")
+
+df_graphs_survey %>% 
+  filter(trial_valence == "negative" ) %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(modularity ~ erq_reap_fr, . ) %>% 
+  summary
+
+df_graphs_survey %>% 
+  filter(trial_valence == "negative" | trial_valence == "neutral") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(modularity ~ erq_reap_fr*trial_valence, . ) %>% 
+  summary
+
+
+```
+
+## Suppression
+
+```{r}
+df_graphs_survey %>% 
+  ggplot(aes(x = erq_supp_fr, y = modularity, color = trial_valence)) + 
+  geom_point(alpha = .3) + 
+  geom_smooth(method="lm")
+
+df_graphs_survey %>% 
+  filter(trial_valence == "negative" ) %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(modularity ~ erq_supp_fr, . ) %>% 
+  summary
+
+df_graphs_survey %>% 
+  filter(trial_valence == "negative" | trial_valence == "neutral") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(modularity ~ erq_supp_fr*trial_valence, . ) %>% 
+  summary
+
+```
+
+
+
+## Situation selection engage
+
+```{r}
+df_graphs_survey %>% 
+  ggplot(aes(x = pmerq_sitsel_eng, y = modularity, color = trial_valence)) + 
+  geom_point(alpha = .3) + 
+  geom_smooth(method="lm")
+
+df_graphs_survey %>% 
+  dplyr::mutate_if(is.numeric, scale) %>% 
+  lm(modularity ~ pmerq_sitsel_eng*trial_valence, .) %>% 
+  summary
+df_graphs_survey %>% 
+  dplyr::filter(trial_valence == "negative") %>% 
+  dplyr::mutate_if(is.numeric, scale) %>% 
+  lm(modularity ~ pmerq_sitsel_eng, .) %>% 
+  summary
+df_graphs_survey %>% 
+  dplyr::filter(trial_valence == "neutral") %>% 
+  dplyr::mutate_if(is.numeric, scale) %>% 
+  lm(modularity ~ pmerq_sitsel_eng, .) %>% 
+  summary
+df_graphs_survey %>% 
+  dplyr::filter(trial_valence == "positive") %>% 
+  dplyr::mutate_if(is.numeric, scale) %>% 
+  lm(modularity ~ pmerq_sitsel_eng, .) %>% 
+  summary
+
+```
+
+
+## Situation selection disengage
+
+```{r}
+df_graphs_survey %>% 
+  ggplot(aes(x = pmerq_sitsel_dis, y = modularity, color = trial_valence)) + 
+  geom_point(alpha = .3) + 
+  geom_smooth(method="lm")
+
+```
+
+## Situation modification engage
+
+```{r}
+df_graphs_survey %>% 
+  ggplot(aes(x = pmerq_sitmod_eng, y = modularity, color = trial_valence)) + 
+  geom_point(alpha = .3) + 
+  geom_smooth(method="lm")
+
+```
+
+## Situation modification disengage
+
+```{r}
+df_graphs_survey %>% 
+  ggplot(aes(x = pmerq_sitmod_dis, y = modularity, color = trial_valence)) + 
+  geom_point(alpha = .3) + 
+  geom_smooth(method="lm")
+
+df_graphs_survey %>% 
+  dplyr::mutate_if(is.numeric, scale) %>% 
+  lm(modularity ~ pmerq_sitmod_dis*trial_valence, .) %>% 
+  summary
+df_graphs_survey %>% 
+  dplyr::filter(trial_valence == "negative") %>% 
+  dplyr::mutate_if(is.numeric, scale) %>% 
+  lm(modularity ~ pmerq_sitmod_dis, .) %>% 
+  summary
+df_graphs_survey %>% 
+  dplyr::filter(trial_valence == "neutral") %>% 
+  dplyr::mutate_if(is.numeric, scale) %>% 
+  lm(modularity ~ pmerq_sitmod_dis, .) %>% 
+  summary
+df_graphs_survey %>% 
+  dplyr::filter(trial_valence == "positive") %>% 
+  dplyr::mutate_if(is.numeric, scale) %>% 
+  lm(modularity ~ pmerq_sitmod_dis, .) %>% 
+  summary
+```
+
+
+## Fatigue
+
+```{r}
+
+df_graphs_survey %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(modularity ~ fss*trial_valence, .) %>% 
+  summary
+df_graphs_survey %>% 
+  ggplot(aes(x = fss, y = modularity, color = trial_valence)) + 
+  geom_point(alpha = .3) + 
+  geom_smooth(method="lm")
+df_graphs_survey %>% 
+  filter(trial_valence == "negative") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(modularity ~ fss, .) %>% 
+  summary
+df_graphs_survey %>% 
+  filter(trial_valence == "neutral") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(modularity ~ fss, .) %>% 
+  summary
+df_graphs_survey %>% 
+  filter(trial_valence == "positive") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(modularity ~ fss, .) %>% 
+  summary
+
+```
+
+## Depression
+
+```{r}
+df_graphs_survey %>% 
+  ggplot(aes(x = phq, y = modularity, color = trial_valence)) + 
+  geom_point(alpha = .3) + 
+  geom_smooth(method="lm")
+
+
+```
+
+## Anxiety
+
+```{r}
+df_graphs_survey %>% 
+  ggplot(aes(x = gad, y = modularity, color = trial_valence)) + 
+  geom_point(alpha = .3) + 
+  geom_smooth(method="lm")
+
+```
+
+## Satisfaction with life
+
+```{r}
+df_graphs_survey %>% 
+  ggplot(aes(x = swls, y = modularity, color = trial_valence)) + 
+  geom_point(alpha = .3) + 
+  geom_smooth(method="lm")
+
+```
+
+# Number of clusters
+
+```{r}
+df_graphs_survey %>% 
+  ggplot(aes(n_clusters)) +
+  geom_histogram()+
+  facet_wrap(~trial_valence)
+```
+
+## Alexithymia
+
+```{r}
+# -- Full scale -- #
+df_graphs_survey %>% 
+  ggplot(aes(x = paq, y = n_clusters, color = trial_valence)) + 
+  geom_point(alpha = .3) + 
+  geom_smooth(method="lm")
+
+# Non-linear plot
+df_graphs_survey %>% 
+  ggplot(aes(x = paq, y = n_clusters, color = trial_valence)) + 
+  geom_point(alpha = .3) + 
+  geom_smooth()
+
+df_graphs_survey %>% 
+  filter(trial_valence == "negative") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(n_clusters ~ paq, .) %>% 
+  summary
+df_graphs_survey %>% 
+  filter(trial_valence == "neutral") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(n_clusters ~ paq, .) %>% 
+  summary
+df_graphs_survey %>% 
+  filter(trial_valence == "positive") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(n_clusters ~ paq, .) %>% 
+  summary
+
+# -- DIF -- #
+
+df_graphs_survey %>% 
+  ggplot(aes(x = paq_dif, y = n_clusters, color = trial_valence)) + 
+  geom_point(alpha = .3) + 
+  geom_smooth(method="lm")
+
+# -- DDF -- #
+df_graphs_survey %>% 
+  ggplot(aes(x = paq_ddf, y = n_clusters, color = trial_valence)) + 
+  geom_point(alpha = .3) + 
+  geom_smooth(method="lm")
+
+# -- EOT -- #
+df_graphs_survey %>% 
+  ggplot(aes(x = paq_eot, y = n_clusters, color = trial_valence)) + 
+  geom_point(alpha = .3) + 
+  geom_smooth(method="lm")
+
+# -- PAQ pos -- #
+df_graphs_survey %>% 
+  ggplot(aes(x = paq_pos, y = n_clusters, color = trial_valence)) + 
+  geom_point(alpha = .3) + 
+  geom_smooth(method="lm")
+df_graphs_survey %>% 
+  filter(trial_valence == "negative") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(n_clusters ~ paq_pos, .) %>% 
+  summary
+df_graphs_survey %>% 
+  filter(trial_valence == "neutral") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(n_clusters ~ paq_pos, .) %>% 
+  summary
+df_graphs_survey %>% 
+  filter(trial_valence == "positive") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(n_clusters ~ paq_pos, .) %>% 
+  summary
+  
+
+# -- PAQ neg -- #
+df_graphs_survey %>% 
+  ggplot(aes(x = paq_neg, y = n_clusters, color = trial_valence)) + 
+  geom_point(alpha = .3) + 
+  geom_smooth(method="lm")
+df_graphs_survey %>% 
+  filter(trial_valence == "negative") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(n_clusters ~ paq_neg, .) %>% 
+  summary
+df_graphs_survey %>% 
+  filter(trial_valence == "neutral") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(n_clusters ~ paq_neg, .) %>% 
+  summary
+df_graphs_survey %>% 
+  filter(trial_valence == "positive") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(n_clusters ~ paq_neg, .) %>% 
+  summary
+  
+
+
+```
+
+## ERQ Reappraisal
+
+```{r}
+df_graphs_survey %>% 
+  ggplot(aes(x = erq_reap_fr, y = n_clusters, color = trial_valence)) + 
+  geom_point(alpha = .3) + 
+  geom_smooth(method="lm")
+
+df_graphs_survey %>% 
+  filter(trial_valence == "negative" ) %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(n_clusters ~ erq_reap_fr, . ) %>% 
+  summary
+
+df_graphs_survey %>% 
+  filter(trial_valence == "negative" | trial_valence == "neutral") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(n_clusters ~ erq_reap_fr*trial_valence, . ) %>% 
+  summary
+
+```
+
+## ERQ suppression
+
+```{r}
+df_graphs_survey %>% 
+  ggplot(aes(x = erq_supp_fr, y = n_clusters, color = trial_valence)) + 
+  geom_point(alpha = .3) + 
+  geom_smooth(method="lm")
+
+df_graphs_survey %>% 
+  filter(trial_valence == "negative" ) %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(n_clusters ~ erq_supp_fr, . ) %>% 
+  summary
+
+df_graphs_survey %>% 
+  filter(trial_valence == "negative" | trial_valence == "neutral") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(n_clusters ~ erq_supp_fr*trial_valence, . ) %>% 
+  summary
+
+```
+
+## PHQ
+
+```{r}
+df_graphs_survey %>% 
+  ggplot(aes(x = phq, y = n_clusters, color = trial_valence)) + 
+  geom_point(alpha = .3, position = position_dodge(.6)) + 
+  geom_smooth(method="lm")
+df_graphs_survey %>% 
+  filter(trial_valence == "negative" ) %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(n_clusters ~ phq, . ) %>% 
+  summary
+
+df_graphs_survey %>% 
+  filter(trial_valence == "negative" | trial_valence == "neutral") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(n_clusters ~ phq*trial_valence, . ) %>% 
+  summary
+
+```
+
+## GAD
+
+```{r}
+
+df_graphs_survey %>% 
+  ggplot(aes(x = gad, y = n_clusters, color = trial_valence)) + 
+  geom_point(alpha = .3, position = position_dodge(.6)) + 
+  geom_smooth(method="lm")
+df_graphs_survey %>% 
+  filter(trial_valence == "negative" ) %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(n_clusters ~ gad, . ) %>% 
+  summary
+
+df_graphs_survey %>% 
+  filter(trial_valence == "negative" | trial_valence == "neutral") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(n_clusters ~ gad*trial_valence, . ) %>% 
+  summary
+
+```
+
+## Fatigue
+
+```{r}
+
+df_graphs_survey %>% 
+  ggplot(aes(x = fss, y = n_clusters, color = trial_valence)) + 
+  geom_point(alpha = .3, position = position_dodge(.6)) + 
+  geom_smooth(method="lm")
+df_graphs_survey %>% 
+  filter(trial_valence == "negative" ) %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(n_clusters ~ fss, . ) %>% 
+  summary
+df_graphs_survey %>% 
+  filter(trial_valence == "positive" ) %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(n_clusters ~ fss, . ) %>% 
+  summary
+
+df_graphs_survey %>% 
+  filter(trial_valence == "negative" | trial_valence == "neutral") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(n_clusters ~ fss*trial_valence, . ) %>% 
+  summary
+
+```
+
+# Transitivity
+
+```{r}
+df_graphs_survey %>% 
+  ggplot(aes(x = trial_valence, y = transitivity_weighted)) +
+  # geom_point(size = .3, alpha = .3) + 
+  stat_summary(fun.data="mean_cl_boot", color="black") +
+  geom_hline(yintercept = 0.2815257, linetype="dotted")
+```
+
+Is transitivity neutral anticorrelated with transitivity for negative?
+```{r}
+dat <- df_graphs_survey %>% 
+  select(pid, trial_valence, transitivity_weighted) %>% 
+  pivot_wider(id_cols = pid, names_from = trial_valence, values_from = transitivity_weighted)
+cor.test(dat$negative, dat$neutral)
+```
+
+
+TODO:
+
+-   Look at transitivity restricting to nodes with a floor threshold degree
+
+    -   Barrat et al., 2004 - clustering coefficient varies as a power law function of degree - high degree nodes have lower clustering
+
+## Alexithymia
+
+* Neutral upslope is strong. Might be due to the a readiness to classify on non-emotional dimensions
+
+```{r}
+df_graphs_survey$transitivity %>% hist
+
+# -- Full scale -- #
+df_graphs_survey %>% 
+  ggplot(aes(x = paq, y = transitivity_weighted, color = trial_valence)) + 
+  geom_point(alpha = .3) + 
+  geom_smooth(method="lm") + 
+  geom_hline(yintercept = 0.2815257, linetype="dotted")
+df_graphs_survey %>% 
+  filter(trial_valence == "negative") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ paq, .) %>% 
+  summary
+df_graphs_survey %>% 
+  filter(trial_valence == "neutral") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ paq, .) %>% 
+  summary
+df_graphs_survey %>% 
+  filter(trial_valence == "positive") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ paq, .) %>% 
+  summary
+
+df_graphs_survey %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ paq*trial_valence, .) %>% 
+  summary
+df_graphs_survey %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ paq*trial_valence, .) %>% 
+  broom::tidy() %>% 
+  mutate_if(is.numeric, ~round(., 3)) %>% 
+  kbl %>% 
+  kable_styling()
+
+
+## DIF
+
+df_graphs_survey %>% 
+  ggplot(aes(x = paq_dif, y = transitivity_weighted, color = trial_valence)) + 
+  geom_point(alpha = .3) + 
+  geom_smooth(method="lm") + 
+  geom_hline(yintercept = 0.2815257, linetype="dotted")
+
+df_graphs_survey %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ paq_dif*trial_valence, .) %>% 
+  summary
+
+
+# DDF
+df_graphs_survey %>% 
+  ggplot(aes(x = paq_ddf, y = transitivity_weighted, color = trial_valence)) + 
+  geom_point(alpha = .3) + 
+  geom_smooth(method="lm") + 
+  geom_hline(yintercept = 0.2815257, linetype="dotted")
+df_graphs_survey %>% 
+  filter(trial_valence == "negative") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ paq_ddf, .) %>% 
+  summary
+df_graphs_survey %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ paq_ddf*trial_valence, .) %>% 
+  summary
+
+
+## EOT
+df_graphs_survey %>% 
+  ggplot(aes(x = paq_eot, y = transitivity_weighted, color = trial_valence)) + 
+  geom_point(alpha = .3) + 
+  geom_smooth(method="lm") + 
+  geom_hline(yintercept = 0.2815257, linetype="dotted")
+df_graphs_survey %>% 
+  filter(trial_valence == "neutral") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ paq_eot, .) %>% 
+  summary
+df_graphs_survey %>% 
+  filter(trial_valence == "negative") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ paq_eot, .) %>% 
+  summary
+df_graphs_survey %>% 
+  filter(trial_valence == "positive") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ paq_eot, .) %>% 
+  summary
+df_graphs_survey %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ paq_eot*trial_valence, .) %>% 
+  summary
+
+## PAQ Pos
+df_graphs_survey %>% 
+  ggplot(aes(x = paq_pos, y = transitivity_weighted, color = trial_valence)) + 
+  geom_point(alpha = .3) + 
+  geom_smooth(method="lm") + 
+  geom_hline(yintercept = 0.2815257, linetype="dotted")
+df_graphs_survey %>% 
+  filter(trial_valence == "negative") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ paq_pos, .) %>% 
+  summary
+df_graphs_survey %>% 
+  filter(trial_valence == "neutral") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ paq_pos, .) %>% 
+  summary
+df_graphs_survey %>% 
+  filter(trial_valence == "positive") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ paq_pos, .) %>% 
+  summary
+  
+
+## PAQ Neg 
+df_graphs_survey %>% 
+  ggplot(aes(x = paq_neg, y = transitivity_weighted, color = trial_valence)) + 
+  geom_point(alpha = .3) + 
+  geom_smooth(method="lm") + 
+  geom_hline(yintercept = 0.2815257, linetype="dotted")
+df_graphs_survey %>% 
+  filter(trial_valence == "negative") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ paq_neg, .) %>% 
+  summary
+df_graphs_survey %>% 
+  filter(trial_valence == "neutral") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ paq_neg, .) %>% 
+  summary
+df_graphs_survey %>% 
+  filter(trial_valence == "positive") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ paq_neg, .) %>% 
+  summary
+  
+
+```
+
+## Reappraisal
+
+```{r}
+
+df_graphs_survey %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ erq_reap_fr*trial_valence, .) %>% 
+  summary
+
+
+df_graphs_survey %>% 
+  ggplot(aes(x = erq_reap_fr, y = transitivity_weighted, color = trial_valence)) + 
+  geom_point(alpha = .3) + 
+  geom_smooth(method="lm")
+df_graphs_survey %>% 
+  filter(trial_valence == "negative") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ erq_reap_fr, .) %>% 
+  summary
+df_graphs_survey %>% 
+  filter(trial_valence == "neutral") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ erq_reap_fr, .) %>% 
+  summary
+df_graphs_survey %>% 
+  filter(trial_valence == "positive") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ erq_reap_fr, .) %>% 
+  summary
+
+```
+
+## Suppression
+
+```{r}
+df_graphs_survey %>% 
+  ggplot(aes(x = erq_supp_fr, y = transitivity_weighted, color = trial_valence)) + 
+  geom_point(alpha = .3) + 
+  geom_smooth(method="lm")
+
+df_graphs_survey %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ erq_supp_fr*trial_valence, .) %>% 
+  summary
+
+df_graphs_survey %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ erq_supp_fr*trial_valence, .) %>% 
+  broom::tidy() %>% 
+  mutate_if(is.numeric, ~round(., 3)) %>% 
+  kbl %>% 
+  kable_styling()
+
+df_graphs_survey %>% 
+  filter(trial_valence == "negative") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ erq_supp_fr, .) %>% 
+  summary
+df_graphs_survey %>% 
+  filter(trial_valence == "neutral") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ erq_supp_fr, .) %>% 
+  summary
+df_graphs_survey %>% 
+  filter(trial_valence == "positive") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ erq_supp_fr, .) %>% 
+  summary
+
+```
+
+
+## Situation selection engage
+
+```{r}
+df_graphs_survey %>% 
+  ggplot(aes(x = pmerq_sitsel_eng,
+             y = transitivity_weighted, 
+             color = trial_valence)) + 
+  geom_point(alpha = .3) + 
+  geom_smooth(method="lm")
+
+df_graphs_survey %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ pmerq_sitsel_eng*trial_valence, .) %>% 
+  summary
+df_graphs_survey %>% 
+  filter(trial_valence == "negative") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ pmerq_sitsel_eng, .) %>% 
+  summary
+df_graphs_survey %>% 
+  filter(trial_valence == "neutral") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ pmerq_sitsel_eng, .) %>% 
+  summary
+df_graphs_survey %>% 
+  filter(trial_valence == "positive") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ pmerq_sitsel_eng, .) %>% 
+  summary
+
+```
+
+
+## Situation selection disengage
+
+```{r}
+df_graphs_survey %>% 
+  ggplot(aes(x = pmerq_sitsel_dis, 
+             y = transitivity_weighted, 
+             color = trial_valence)) + 
+  geom_point(alpha = .3) + 
+  geom_smooth(method="lm")
+
+df_graphs_survey %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ pmerq_sitsel_dis*trial_valence, .) %>% 
+  summary
+df_graphs_survey %>% 
+  filter(trial_valence == "negative") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ pmerq_sitsel_dis, .) %>% 
+  summary
+df_graphs_survey %>% 
+  filter(trial_valence == "neutral") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ pmerq_sitsel_dis, .) %>% 
+  summary
+df_graphs_survey %>% 
+  filter(trial_valence == "positive") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ pmerq_sitsel_dis, .) %>% 
+  summary
+
+```
+
+## Situation modification engage
+
+```{r}
+df_graphs_survey %>% 
+  ggplot(aes(x = pmerq_sitmod_eng, 
+             y = transitivity_weighted, 
+             color = trial_valence)) + 
+  geom_point(alpha = .3) + 
+  geom_smooth(method="lm")
+
+```
+
+## Situation modification disengage
+
+```{r}
+df_graphs_survey %>% 
+  ggplot(aes(x = pmerq_sitmod_dis, 
+             y = transitivity_weighted, 
+             color = trial_valence)) + 
+  geom_point(alpha = .3) + 
+  geom_smooth(method="lm")
+
+```
+
+
+## Fatigue
+
+```{r}
+
+df_graphs_survey %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ fss*trial_valence, .) %>% 
+  summary
+df_graphs_survey %>% 
+  ggplot(aes(x = fss, y = transitivity_weighted, color = trial_valence)) + 
+  geom_point(alpha = .3) + 
+  geom_smooth(method="lm")
+df_graphs_survey %>% 
+  filter(trial_valence == "negative") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ fss, .) %>% 
+  summary
+df_graphs_survey %>% 
+  filter(trial_valence == "neutral") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ fss, .) %>% 
+  summary
+df_graphs_survey %>% 
+  filter(trial_valence == "positive") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ fss, .) %>% 
+  summary
+
+```
+
+## Depression
+
+* Significant association with negative and significant interaction
+```{r}
+df_graphs_survey %>% 
+  ggplot(aes(x = phq, y = transitivity_weighted, color = trial_valence)) + 
+  geom_point(alpha = .3) + 
+  geom_smooth(method="lm")
+
+df_graphs_survey %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ phq*trial_valence, .) %>% 
+  broom::tidy() %>% 
+  mutate_if(is.numeric, ~round(., 3)) %>% 
+  kbl %>% 
+  kable_styling()
+
+df_graphs_survey %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ phq*trial_valence, .) %>% 
+  summary
+df_graphs_survey %>% 
+  filter(trial_valence == "negative") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ phq, .) %>% 
+  summary
+df_graphs_survey %>% 
+  filter(trial_valence == "neutral") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ phq, .) %>% 
+  summary
+df_graphs_survey %>% 
+  filter(trial_valence == "positive") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ phq, .) %>% 
+  summary
+
+```
+
+## Anxiety
+
+```{r}
+df_graphs_survey %>% 
+  ggplot(aes(x = gad, y = transitivity_weighted, color = trial_valence)) + 
+  geom_point(alpha = .3) + 
+  geom_smooth(method="lm")
+
+df_graphs_survey %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ gad*trial_valence, .) %>% 
+  broom::tidy() %>% 
+  mutate_if(is.numeric, ~round(., 3)) %>% 
+  kbl %>% 
+  kable_styling()
+
+df_graphs_survey %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ gad*trial_valence, .) %>% 
+  summary
+df_graphs_survey %>% 
+  filter(trial_valence == "negative") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ gad, .) %>% 
+  summary
+df_graphs_survey %>% 
+  filter(trial_valence == "neutral") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ gad, .) %>% 
+  summary
+df_graphs_survey %>% 
+  filter(trial_valence == "positive") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ gad, .) %>% 
+  summary
+
+```
+
+## Satisfaction with life
+
+```{r}
+df_graphs_survey %>% 
+  ggplot(aes(x = swls, y = transitivity_weighted, color = trial_valence)) + 
+  geom_point(alpha = .3) + 
+  geom_smooth(method="lm")
+df_graphs_survey %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ swls*trial_valence, .) %>% 
+  summary
+df_graphs_survey %>% 
+  filter(trial_valence == "negative") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ swls, .) %>% 
+  summary
+df_graphs_survey %>% 
+  filter(trial_valence == "neutral") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ swls, .) %>% 
+  summary
+df_graphs_survey %>% 
+  filter(trial_valence == "positive") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ swls, .) %>% 
+  summary
+
+```
+
+
+
+```{r}
+cor.test(df_graphs_survey$phq, df_graphs_survey$paq)
+cor.test(df_graphs_survey$gad, df_graphs_survey$paq)
+cor.test(df_graphs_survey$phq, df_graphs_survey$gad)
+df_graphs_survey %>% 
+  filter(trial_valence == "negative") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ gad + paq_eot, .) %>% 
+  summary
+df_graphs_survey %>% 
+  filter(trial_valence == "negative") %>% 
+  mutate_if(is.numeric, scale) %>% 
+  lm(transitivity_weighted ~ phq + paq_eot, .) %>% 
+  summary
+```
+
+
+# ERGM exploration
+http://statnet.org/Workshops/valued.html
+```{r}
+library(ergm)
+
+g <- df_graphs_survey$graph[[3]]
+adj_mat <- as_adjacency_matrix(g, attr="weight", sparse=F)
+# adj_mat[adj_mat < 1] <- 0
+amat <- network(adj_mat, directed=FALSE)
+amat <- set.edge.value(amat,"weight", adj_mat)
+as.matrix.network(amat)
+as.matrix.network(amat, attrname = "weight")
+
+# fit <- ergm(amat ~ edges + gwesp(1,fixed=FALSE),
+#             # response = "weight", 
+#             # reference = ~Unif(0,1),
+#             # verbose=3
+#             control = list(MCMLE.termination="Hotelling")
+# )
+# summary(fit)
+
+
+fit <- ergm(
+  amat ~ edges + transitiveweights(),
+  reference = ~Unif(0,1),
+  response = "weight",
+  control = list(MCMLE.termination="Hotelling")
+)
+summary(fit)
+
+plot(amat, 
+     # edge.col = samplk.ecol, 
+     usecurve = TRUE, 
+     edge.curve = 1e-04, 
+     displaylabels = TRUE, 
+     # vertex.col = as.factor(samplk.tot %v% "group")
+)
+
+# saveRDS(fit, "fit.rds")
+
+
+inv.logit <- function(logit){
+  odds <- exp(logit)
+  prob <- odds / (1 + odds)
+  return(prob)
+}
+
+theta <- coef(fit)
+inv.logit(theta)
+```
+
+```{r}
+data(florentine)
+summary(flomarriage~edges+triangle)
+flomodel.02 <- ergm(flomarriage~edges+triangle) 
+summary(flomodel.02)
+```
+
+
+## Fit ERGM and extract transitivity paramter for each participant
+```{r}
+
+dat <- df_graphs_survey %>% 
+  filter(trial_valence=="negative") %>% 
+  mutate(statnet_graph = map(adjacency_mat, ~as.network(., 
+                                                        directed=FALSE, 
+                                                        matrix.type="a",
+                                                        ignore.eval=FALSE,
+                                                        names.eval="weight"))) %>% 
+  mutate(ergm_fit=NA)
+
+# fits_dat <- dat  %>% 
+#   mutate(ergm_fit = map(adjacency_mat, ~ergm(
+#     . ~ edges + transitiveweights(),
+#     reference = ~Unif(0,1),
+#     response = "weight",
+#     control = list(MCMLE.termination="Hotelling")
+#   )))
+
+
+for(i in 1:nrow(dat)){
+  
+  fit <- ergm(
+    dat$statnet_graph[[i]] ~ edges + transitiveweights(),
+    reference = ~Unif(0,1),
+    response = "weight",
+    control = list(MCMLE.termination="Hotelling")
+  )
+
+  dat$ergm_fit[i] <- fit
+}
+
+dat %>% 
+  mutate(ergm_fit = map(statnet_graph,
+                        ~ergm(
+                          . ~ edges + transitiveweights(),
+                          reference = ~Unif(0,1),
+                          response = "weight",
+                          control = list(MCMLE.termination="Hotelling")
+                        )))
+
+```
+
+<!-- # Smallworldiness -->
+
+<!-- ```{r} -->
+
+<!-- ## Full scale -->
+
+<!-- df_graphs_survey %>%  -->
+
+<!--   ggplot(aes(x = paq, y = smallworldness, color = trial_valence)) +  -->
+
+<!--   geom_point(alpha = .3) +  -->
+
+<!--   geom_smooth(method="lm") -->
+
+<!-- df_graphs_survey %>%  -->
+
+<!--   filter(trial_valence == "negative") %>%  -->
+
+<!--   mutate_if(is.numeric, scale) %>%  -->
+
+<!--   lm(smallworldness ~ paq, .) %>%  -->
+
+<!--   summary -->
+
+<!-- df_graphs_survey %>%  -->
+
+<!--   filter(trial_valence == "neutral") %>%  -->
+
+<!--   mutate_if(is.numeric, scale) %>%  -->
+
+<!--   lm(smallworldness ~ paq, .) %>%  -->
+
+<!--   summary -->
+
+<!-- df_graphs_survey %>%  -->
+
+<!--   filter(trial_valence == "positive") %>%  -->
+
+<!--   mutate_if(is.numeric, scale) %>%  -->
+
+<!--   lm(smallworldness ~ paq, .) %>%  -->
+
+<!--   summary -->
+
+<!-- ## DIF -->
+
+<!-- df_graphs_survey %>%  -->
+
+<!--   ggplot(aes(x = paq_dif, y = smallworldness, color = trial_valence)) +  -->
+
+<!--   geom_point(alpha = .3) +  -->
+
+<!--   geom_smooth(method="lm") -->
+
+<!-- # DDF -->
+
+<!-- df_graphs_survey %>%  -->
+
+<!--   ggplot(aes(x = paq_ddf, y = smallworldness, color = trial_valence)) +  -->
+
+<!--   geom_point(alpha = .3) +  -->
+
+<!--   geom_smooth(method="lm") -->
+
+<!-- ## EOT -->
+
+<!-- df_graphs_survey %>%  -->
+
+<!--   ggplot(aes(x = paq_eot, y = smallworldness, color = trial_valence)) +  -->
+
+<!--   geom_point(alpha = .3) +  -->
+
+<!--   geom_smooth(method="lm") -->
+
+<!-- ## PAQ Pos -->
+
+<!-- df_graphs_survey %>%  -->
+
+<!--   ggplot(aes(x = paq_pos, y = smallworldness, color = trial_valence)) +  -->
+
+<!--   geom_point(alpha = .3) +  -->
+
+<!--   geom_smooth(method="lm") -->
+
+<!-- df_graphs_survey %>%  -->
+
+<!--   filter(trial_valence == "negative") %>%  -->
+
+<!--   mutate_if(is.numeric, scale) %>%  -->
+
+<!--   lm(smallworldness ~ paq_pos, .) %>%  -->
+
+<!--   summary -->
+
+<!-- df_graphs_survey %>%  -->
+
+<!--   filter(trial_valence == "neutral") %>%  -->
+
+<!--   mutate_if(is.numeric, scale) %>%  -->
+
+<!--   lm(transitivity ~ paq_pos, .) %>%  -->
+
+<!--   summary -->
+
+<!-- df_graphs_survey %>%  -->
+
+<!--   filter(trial_valence == "positive") %>%  -->
+
+<!--   mutate_if(is.numeric, scale) %>%  -->
+
+<!--   lm(smallworldness ~ paq_pos, .) %>%  -->
+
+<!--   summary -->
+
+<!-- ## PAQ Neg  -->
+
+<!-- df_graphs_survey %>%  -->
+
+<!--   ggplot(aes(x = paq_neg, y = smallworldness, color = trial_valence)) +  -->
+
+<!--   geom_point(alpha = .3) +  -->
+
+<!--   geom_smooth(method="lm") -->
+
+<!-- df_graphs_survey %>%  -->
+
+<!--   filter(trial_valence == "negative") %>%  -->
+
+<!--   mutate_if(is.numeric, scale) %>%  -->
+
+<!--   lm(smallworldness ~ paq_neg, .) %>%  -->
+
+<!--   summary -->
+
+<!-- df_graphs_survey %>%  -->
+
+<!--   filter(trial_valence == "neutral") %>%  -->
+
+<!--   mutate_if(is.numeric, scale) %>%  -->
+
+<!--   lm(smallworldness ~ paq_neg, .) %>%  -->
+
+<!--   summary -->
+
+<!-- df_graphs_survey %>%  -->
+
+<!--   filter(trial_valence == "positive") %>%  -->
+
+<!--   mutate_if(is.numeric, scale) %>%  -->
+
+<!--   lm(smallworldness ~ paq_neg, .) %>%  -->
+
+<!--   summary -->
+
+<!-- ``` -->
+
+# Session Info
+
+```{r}
+sessionInfo()
+```

@@ -1,0 +1,178 @@
+---
+title: "Preprocessing script"
+author: "Ashish"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    number_sections: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    theme: paper
+---
+
+# Initialization
+```{r, message=FALSE}
+# devtools::install_github("amehtaSF/rsurveyutils")
+library(rsurveyutils)
+library(here)
+library(tidyverse)
+library(tidylog)
+
+theme_set(theme_bw())
+```
+
+
+## Functions
+
+```{r}
+#' scale_numerics
+#' 
+#' z-scores values of all numeric columns
+#' 
+#' @param df input dataframe
+#' @param new_cols boolean indicating whether to create new columns when scaling or scale in place
+#' @param ... arguments to be passed to rsurveyutils::scale()
+#'
+#' @return dataframe with scaled values
+scale_numerics <- function(df, new_cols=TRUE, ...){
+  
+  if(new_cols){df %>% mutate_if(is.numeric, list(sc = ~rsurveyutils::scale(., ...)))}
+  else {df %>% mutate_if(is.numeric,  ~scale(., ...))}
+}
+#' recent_date_dir
+#'
+#' Get the most subdirectory named with a date from a directory
+#'
+#' @param directory directory to search for dated subdirectories
+#' @param recursive boolean indicating whether to do recursive subdirectory search
+#'
+#' @return path of most recent dated subdirectory
+recent_date_dir <- function(directory, recursive=FALSE){
+  files <- list.files(directory, 
+                      pattern="[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}$",
+                      include.dirs=TRUE,
+                      recursive=recursive)
+  files <- sort(as.Date(files), decreasing = TRUE)
+  date_dir_path <- paste0(directory, "/", files[1])
+  return(date_dir_path)
+}
+```
+
+# Preprocessing
+
+## Read task data
+```{r, message=FALSE}
+filepath <- paste0(
+  recent_date_dir(here("data/raw/emotion_similarity_task")),
+  # "data/raw/emotion_similarity_task/",
+  # "2021-07-09/",
+  # "2021-07-26",
+  "/emo-similarity-task-sum2021.csv")
+  # "/emotion-similarity-task.csv")
+
+print(paste("Datafile:", filepath))
+df_file <- read_csv(filepath)
+
+df_raw <- df_file 
+```
+
+## Create first stage processed dataframe for task
+
+```{r, message=FALSE}
+df_proc <- df_raw %>% 
+  filter(pool == "rep" | pool == "psychone") %>% 
+  filter(nchar(pid) >= 4) %>% 
+  # -- remove columns with all NA -- #
+  select_if(~!all(is.na(.))) %>% 
+  # -- keep only rows that represent trials -- #
+  # filter(trial_type == "image-multi-select") %>% 
+  # filter(!str_detect(stimuli, "practice_images")) %>% 
+  # -- reformat file name strings -- #
+  mutate(stimuli = str_replace_all(stimuli, '\\[|\\]|\\"', '')) %>% 
+  mutate_at(vars(images_chosen, stimuli), ~str_replace_all(., "/", "_")) %>% 
+  mutate_at(vars(stimuli, images_chosen), ~str_replace_all(., "Stimuli_", "")) %>% 
+  # -- get file names in separate columns -- #
+  separate(stimuli, c("img_file_1", "img_file_2", "img_file_3"), sep=",") %>% 
+  mutate(
+    trial_valence = str_extract(img_file_1, "negative|positive|neutral")
+  ) %>% 
+  # mutate(
+  #   img_valence_1 = str_extract(img_file_1, "negative|positive|neutral"),
+  #   img_valence_2 = str_extract(img_file_2, "negative|positive|neutral"),
+  #   img_valence_3 = str_extract(img_file_3, "negative|positive|neutral"),
+  # ) %>% 
+  # -- get chosen and not chosen file names -- #
+  mutate(imgs_filesChosen = str_replace_all(images_chosen, '\\[|\\]|\\"', '')) %>% 
+  select(-images_chosen) %>% 
+  separate(imgs_filesChosen, c("img_file_chosen_1", "img_file_chosen_2"), sep=",") %>% 
+  mutate(img_file_notChosen = case_when(
+    img_file_1 != img_file_chosen_1 & img_file_1 != img_file_chosen_2 ~ img_file_1,
+    img_file_2 != img_file_chosen_1 & img_file_2 != img_file_chosen_2 ~ img_file_2,
+    img_file_3 != img_file_chosen_1 & img_file_3 != img_file_chosen_2 ~ img_file_3
+  )) %>%
+  
+  # -- get chosen and not chosen file numbers -- #
+  mutate(img_num_chosen_1 = case_when(
+    img_file_chosen_1 == img_file_1 ~ 1,
+    img_file_chosen_1 == img_file_2 ~ 2,
+    img_file_chosen_1 == img_file_3 ~ 3
+  )) %>% 
+  mutate(img_num_chosen_2 = case_when(
+    img_file_chosen_2 == img_file_1 ~ 1,
+    img_file_chosen_2 == img_file_2 ~ 2,
+    img_file_chosen_2 == img_file_3 ~ 3
+  )) %>% 
+  mutate(img_num_notChosen = case_when(
+    img_file_1 != img_file_chosen_1 & img_file_1 != img_file_chosen_2 ~ 1,
+    img_file_2 != img_file_chosen_1 & img_file_2 != img_file_chosen_2 ~ 2,
+    img_file_3 != img_file_chosen_1 & img_file_3 != img_file_chosen_2 ~ 3
+  )) %>% 
+  # -- attention checks -- #
+  # ac free response
+  mutate(ac_freeResp = ifelse(str_detect(responses, "ac_1"), responses, "")) %>% 
+  mutate(ac_freeResp = str_replace_all(ac_freeResp, '[\\{\\}\\"]', "")) %>% 
+  mutate(ac_freeResp = str_replace_all(ac_freeResp, "ac_1:", "")) %>% 
+  mutate(trial_valence = ifelse(ac_freeResp != "", lag(trial_valence), trial_valence)) %>% 
+  # ac forced choice
+  mutate(ac_forceChoice_file =  ifelse(str_detect(responses, "ac_2"), responses, "")) %>% 
+  mutate(ac_forceChoice_file = str_replace_all(ac_forceChoice_file, 
+                                               '[\\{\\}\\"]', 
+                                               "")) %>% 
+  mutate(ac_forceChoice_file = str_replace_all(ac_forceChoice_file, 
+                                               "ac_2:.*img src =", 
+                                               "")) %>% 
+  mutate(ac_forceChoice_file = str_replace_all(ac_forceChoice_file, 
+                                               " width=266.66 height=200>",
+                                               "")) %>%
+  mutate(ac_forceChoice_file = str_replace_all(ac_forceChoice_file,
+                                               "/", 
+                                               "_")) %>% 
+  mutate(ac_forceChoice_file = str_replace_all(ac_forceChoice_file, 
+                                               "Stimuli_",
+                                               "")) %>% 
+  mutate(ac_forceChoice = ifelse(lag(img_file_notChosen) == ac_forceChoice_file, 1, 0)) %>% 
+  mutate(ac_forceChoice = ifelse(ac_forceChoice_file == "", NA, ac_forceChoice)) 
+```
+
+TODO: Remove unneeded columns from task dataframe
+
+```{r, echo=FALSE}
+# ------ End Preprocessing ------ #
+# ----- Run all chunks above -----#
+```
+
+# Export CSV
+```{r}
+# filepath_output <- paste0("data/proc/", Sys.Date(), "/_proc.csv")
+filepath_output <- "data/proc/emoSimilarityTask_proc.csv"
+df_proc %>% 
+  write_csv(here(filepath_output))
+```
+
+
+# Session Info
+```{r}
+sessionInfo()
+```

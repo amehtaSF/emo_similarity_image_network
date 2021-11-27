@@ -1,0 +1,239 @@
+---
+title: "Preprocessing script"
+author: "Ashish"
+date: "`r Sys.Date()`"
+output: rmdformats::readthedown
+---
+
+# Initialization
+```{r, message=FALSE}
+library(rsurveyutils)
+library(igraph)
+library(here)
+library(tidyverse)
+library(tidylog)
+theme_set(theme_bw())
+```
+
+
+# Preprocessing
+
+
+## Read data
+```{r}
+# codebook_filepath <- ""
+# codebook_vars <- readxl::read_excel(here(codebook_filepath), sheet="variables")
+# codebook_values <- readxl::read_excel(here(codebook_filepath), sheet="values")
+
+filepath <- "data/internal_pilot/raw/2021-06-05/emotion-similarity-task_11.csv"
+df_file <- read_csv(here(filepath))
+df_raw <- df_file %>% 
+  mutate(rawdatafile = filepath) %>% 
+  # -- rename columns -- #
+  rename(
+    pid = run_id
+  )
+  # codebook_renamer(codebook=codebook_vars)
+```
+
+## Process data
+```{r}
+df_recoded <- df_raw #%>% 
+	# -- recode variables -- #
+	# codebook_recoder(codebook=codebook_values)
+df_proc <- df_recoded %>% 
+  slice(-1) %>% 
+  select(-c(condition, success, timeout, failed_images, failed_audio, failed_video, 
+            trial_type, internal_node_id, `click-by-click-data`, recorded_at, user_agent, ip,
+            platform, platform_version, device, browser, browser_version)) %>% 
+  # -- remove columns with all NA -- #
+  select_if(~!all(is.na(.))) %>% 
+  # -- reformat file name strings -- #
+  mutate(stimuli = str_replace_all(stimuli, '\\[|\\]|\\"', '')) %>% 
+  mutate_at(vars(images_chosen, stimuli), ~str_replace_all(., "/", "_")) %>% 
+  mutate_at(vars(stimuli, images_chosen), ~str_replace_all(., "Stimuli_", "")) %>% 
+  # -- get file names in separate columns -- #
+  separate(stimuli, c("img_file_1", "img_file_2", "img_file_3"), sep=",") %>% 
+  mutate(
+    img_valence_1 = str_extract(img_file_1, "negative|positive|neutral"),
+    img_valence_2 = str_extract(img_file_2, "negative|positive|neutral"),
+    img_valence_3 = str_extract(img_file_3, "negative|positive|neutral"),
+  ) %>% 
+  # -- get chosen and not chosen file names -- #
+  mutate(imgs_filesChosen = str_replace_all(images_chosen, '\\[|\\]|\\"', '')) %>% 
+  select(-images_chosen) %>% 
+  separate(imgs_filesChosen, c("img_file_chosen_1", "img_file_chosen_2"), sep=",") %>% 
+  mutate(img_file_notChosen = case_when(
+    img_file_1 != img_file_chosen_1 & img_file_1 != img_file_chosen_2 ~ img_file_1,
+    img_file_2 != img_file_chosen_1 & img_file_2 != img_file_chosen_2 ~ img_file_2,
+    img_file_3 != img_file_chosen_1 & img_file_3 != img_file_chosen_2 ~ img_file_3
+  )) %>%
+  
+  # -- get chosen and not chosen file numbers -- #
+  mutate(img_num_chosen_1 = case_when(
+    img_file_chosen_1 == img_file_1 ~ 1,
+    img_file_chosen_1 == img_file_2 ~ 2,
+    img_file_chosen_1 == img_file_3 ~ 3
+  )) %>% 
+  mutate(img_num_chosen_2 = case_when(
+    img_file_chosen_2 == img_file_1 ~ 1,
+    img_file_chosen_2 == img_file_2 ~ 2,
+    img_file_chosen_2 == img_file_3 ~ 3
+  )) %>% 
+  mutate(img_num_notChosen = case_when(
+    img_file_1 != img_file_chosen_1 & img_file_1 != img_file_chosen_2 ~ 1,
+    img_file_2 != img_file_chosen_1 & img_file_2 != img_file_chosen_2 ~ 2,
+    img_file_3 != img_file_chosen_1 & img_file_3 != img_file_chosen_2 ~ 3
+  )) 
+```
+
+```{r}
+df_trials <- df_proc %>% 
+  select(pid, trial_index, 
+         img_file_chosen_1, img_file_chosen_2,
+         img_file_1, img_file_2, img_file_3) %>% 
+  pivot_longer(c(img_file_1, img_file_2, img_file_3), values_to="img_file", names_to="label") %>% 
+  mutate(is_chosen=ifelse(img_file == img_file_chosen_1 | img_file == img_file_chosen_2, 1, 0)) %>% 
+  select(-c(img_file_chosen_1, img_file_chosen_2)) %>% 
+  arrange(pid, trial_index, img_file)
+
+df_trials_wide <- df_trials %>% 
+  arrange(pid, trial_index, desc(is_chosen), img_file) %>% 
+  select(-label) %>% 
+  group_by(pid, trial_index) %>% 
+  # mutate(img_num = paste0("img_file_", 1:n())) %>% 
+  mutate(img_num = 1:n()) %>% 
+  ungroup %>% 
+  pivot_wider(id_cols = c(pid, trial_index), names_from = img_num, values_from=c(img_file, is_chosen))
+```
+
+<!-- ```{r} -->
+<!-- df_freq <- df_proc %>%  -->
+<!--   xtabs(~img_file_chosen_1 + img_file_chosen_2, .) %>%  -->
+<!--   as.data.frame -->
+
+<!-- df_freq_wide <- df_freq %>%  -->
+<!--   pivot_wider(img_file_chosen_1, names_from = "img_file_chosen_2", values_from="Freq") %>%  -->
+<!--   select(sort(current_vars())) %>%  -->
+<!--   select(img_file_chosen_1, everything()) %>%  -->
+<!--   arrange(img_file_chosen_1) -->
+<!-- ``` -->
+
+```{r}
+ALL_IMAGES <- sort(unique(c(df_proc$img_file_1, df_proc$img_file_2, df_proc$img_file_3)))
+df_img_pairs <- tibble(img_file_1 = ALL_IMAGES, img_file_2 = ALL_IMAGES) %>% 
+  expand(img_file_1, img_file_2) %>% 
+  filter(img_file_1 < img_file_2) 
+
+df_chosen_count <- df_trials_wide %>% 
+  group_by(img_file_1, img_file_2) %>% 
+  summarize(chosen=n())
+
+df_notChosen_count_1 <- df_trials_wide %>% 
+  select(img_file_1, img_file_3) %>% 
+  rename(img_file_2 = img_file_3) %>% 
+  group_by(img_file_1, img_file_2) %>% 
+  summarize(notChosen_1=n())
+
+df_notChosen_count_2 <- df_trials_wide %>% 
+  select(img_file_2, img_file_3) %>% 
+  rename(img_file_1 = img_file_2) %>% 
+  rename(img_file_2 = img_file_3) %>% 
+  group_by(img_file_1, img_file_2) %>% 
+  summarize(notChosen_2=n())
+
+df_notChosen_count <- df_notChosen_count_1 %>% 
+  full_join(df_notChosen_count_2) %>% 
+  mutate(notChosen_1 = replace_na(notChosen_1, 0)) %>%
+  mutate(notChosen_2 = replace_na(notChosen_2, 0)) %>%
+  mutate(notChosen = notChosen_1 + notChosen_2) %>% 
+  select(-notChosen_1, -notChosen_2)
+  
+# correct working data frame
+df_chosen <- df_chosen_count %>% 
+  full_join(df_notChosen_count) %>% 
+  mutate_at(vars(chosen, notChosen), ~replace_na(., 0)) %>% 
+  mutate(chosen_pr = chosen/(chosen+notChosen))
+  
+```
+
+
+```{r, echo=FALSE}
+# ------ End Preprocessing ------ #
+# ----- Run all chunks above -----#
+```
+
+
+<!-- ```{r} -->
+<!-- library(igraph) -->
+<!-- g0 <- xtabs(~img_file_chosen_1+img_file_chosen_2, df_proc) %>%  -->
+<!--   as.data.frame -->
+
+
+<!-- g1 <- g0%>%  -->
+<!--   pivot_wider(img_file_chosen_1, names_from = "img_file_chosen_2", values_from="Freq") -->
+<!-- g2 <- g1 %>%  -->
+<!--   select(-img_file_chosen_1) %>%  -->
+<!--   as.matrix -->
+<!-- rownames(g2) <- g1$img_file_chosen_1 -->
+
+<!-- graph_from_data_frame(g0) %>%  -->
+<!--   plot -->
+
+<!-- g3 <- (t(g2) %*% g2 ) -->
+<!-- graph_from_adjacency_matrix(g3, weighted=TRUE) %>% plot -->
+
+
+
+
+<!-- g0.1 <- g0 %>%  -->
+<!--   rename(f1 = img_file_chosen_1, f2 = img_file_chosen_2, freq_1=Freq) %>%  -->
+<!--   rename(img_file_chosen_1 = f2, img_file_chosen_2 = f1) %>%  -->
+<!--   full_join(g0) %>%  -->
+<!--   mutate(freq_1 = replace_na(freq_1, 0)) %>%  -->
+<!--   mutate(Freq = replace_na(Freq, 0)) %>%  -->
+<!--   mutate(Freq = freq_1 + Freq) %>%  -->
+<!--   select(-freq_1) -->
+
+
+<!-- g1 <- g0.1%>%  -->
+<!--   pivot_wider(img_file_chosen_1, names_from = "img_file_chosen_2", values_from="Freq") -->
+<!-- g2 <- g1 %>%  -->
+<!--   select(-img_file_chosen_1) %>%  -->
+<!--   as.matrix -->
+<!-- rownames(g2) <- g1$img_file_chosen_1 -->
+
+<!-- graph_from_data_frame(g0) %>%  -->
+<!--   plot -->
+
+<!-- gr <- graph_from_adjacency_matrix(g2, weighted=TRUE,mode="upper", diag=FALSE) -->
+<!-- gr %>% plot -->
+<!-- gr %>% communities() -->
+
+
+
+<!-- ``` -->
+
+# graph community structure and modularity
+```{r}
+g <- df_trials_wide %>% 
+  select(img_file_1, img_file_2) %>% 
+  graph_from_data_frame(directed=FALSE) 
+g %>% 
+  plot
+
+g %>% betweenness(directed=FALSE) %>% sort
+comm <- g %>% cluster_walktrap
+print(comm)
+plot(comm, g)
+
+```
+
+
+
+
+# Session Info
+```{r}
+sessionInfo()
+```
+
